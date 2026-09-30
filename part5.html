@@ -1,0 +1,3462 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <title>Tilcayo - Parte 5: El jefe final</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <style type="text/css">
+        body {
+            margin: 0;
+            background: #0b1a12;
+            display: flex;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+<script type="text/javascript">
+
+// =====================================================
+//  TILCAYO - Parte 5: el jefe final
+//  - Al final del nivel el jefe hace su ronda; cuando el Tilcayo se acerca
+//    se ríe, se cierra la arena y empieza la pelea
+//  - Al jefe se le pega con las espadas (con poder) o saltándole encima
+//  - Al vencerlo se abre el camino a la pirámide: arriba está la jaula
+//    con la familia del Tilcayo. Al tocarla se rescata y termina el juego
+//  - Animaciones de caminar (Tilcayo_walk.png, power_walk.png) y salto del
+//    guerrero (power_jump.png)
+//  - Mientras se acerca al jefe se arma una tormenta fría: cielo azul oscuro,
+//    aguacero y relámpagos. Al vencerlo vuelve el sol, y al rescatar a la
+//    familia es un día alegre y brillante (arcoíris y mariposas)
+//  - Al empezar la pelea cae una jaula alrededor de la arena, con plataformas
+//    y cajas para saltar. Saltarle encima al jefe solo le quita vida a él
+//  - De vez en cuando cae comida (carne de poder) del cielo
+//  - Créditos al abrir, menú con botón JUGAR y una historia animada corta que
+//    pasa directo al juego
+//  Autores: Jaime Dennis Guzman, Leonardo Herrera Dante, Neils Laime Balderrama
+//  - Animación de muerte del jefe (muerte_jefe.png)
+//  - Sonidos hechos con Web Audio: espada, golpes, disparos, lluvia, truenos,
+//    comer, explosión y música feliz al rescatar a la familia
+//  (de la parte 4: salto y torreta; de la parte 3: carnes de poder y espadas)
+//  Controles: ← → caminar, ↑ o ESPACIO saltar, X atacar (con poder), R reiniciar
+// =====================================================
+
+var ANCHO = 800;
+var ALTO = 600;
+var ANCHO_NIVEL = 4800;
+var SUELO_Y = 520;   // borde de arriba del suelo
+var AGUA_Y = 540;    // superficie del agua
+
+// Tramos de suelo [inicio, fin]; los huecos entre ellos son agua
+var TRAMOS_SUELO = [[0, 760], [900, 1500], [1680, 2320], [2480, 3300], [3440, 4800]];
+
+// Árboles grandes del nivel (más adelante se podrán trepar)
+var ARBOLES_NIVEL = [1110, 2070];
+
+// Ramas [x, y, ancho] pegadas a los árboles del nivel
+var RAMAS = [
+    [960, 390, 150], [1150, 290, 140], [1000, 190, 150],
+    [1920, 380, 150], [2110, 280, 140], [1960, 180, 150]
+];
+
+// Obstáculos sobre el suelo
+var OBSTACULOS = [
+    { tipo: 'tocon',   x: 330 },
+    { tipo: 'roca',    x: 560 },
+    { tipo: 'tronco',  x: 1320 },
+    { tipo: 'espinas', x: 1820 },
+    { tipo: 'roca',    x: 2640 },
+    { tipo: 'espinas', x: 2850 },
+    { tipo: 'tocon',   x: 3020 }
+];
+
+// Tamaño de la caja de choque de cada obstáculo [ancho, alto]
+var CAJAS_OBSTACULO = {
+    tocon:   [52, 45],
+    roca:    [84, 46],
+    tronco:  [150, 42],
+    espinas: [70, 40]
+};
+
+// Carnes de poder [tipo, x, y]
+var CARNES = [
+    ['carne',  450,  SUELO_Y - 30],
+    ['filete', 1070, 160],             // arriba en la rama más alta
+    ['carne',  1320, SUELO_Y - 75],    // encima del tronco caído
+    ['filete', 1590, 430],             // sobre el agua: hay que saltar
+    ['carne',  2180, 250],
+    ['filete', 2740, SUELO_Y - 30],    // justo antes de las espinas
+    ['carne',  3230, SUELO_Y - 30]     // para entrar con poder a la pelea
+];
+
+var DURACION_PODER = 30000;   // 30 segundos
+
+// Contorno del gato en cada cuadro de Tilcayo_jump.png [izq, arriba, der, abajo].
+// En la hoja el gato sube y baja dentro del cuadro; con esto lo recortamos
+// y lo centramos, así el salto lo hacen las físicas y no el dibujo.
+var CONTORNOS_SALTO = [
+    [46, 144, 178, 208], [44, 140, 176, 208], [41, 117, 168, 208], [45, 97, 166, 208], [52, 76, 170, 204],
+    [57, 61, 171, 180],  [61, 46, 172, 155],  [61, 41, 174, 149],  [63, 38, 175, 143], [60, 36, 176, 134],
+    [56, 36, 177, 127],  [52, 37, 177, 123],  [46, 40, 177, 122],  [45, 42, 177, 121], [42, 45, 177, 122],
+    [41, 49, 177, 125],  [42, 54, 177, 132],  [44, 59, 176, 139],  [48, 64, 176, 148], [54, 72, 175, 165],
+    [59, 78, 174, 178],  [67, 86, 172, 196],  [72, 95, 170, 209],  [59, 115, 171, 208], [46, 133, 174, 208]
+];
+
+// ---- Torreta enemiga ----
+// Cuadros de torreta.png: [x, ancho]. El 0 está quieto, 1-3 disparando.
+var CUADROS_TORRETA = [[24, 242], [285, 340], [645, 340], [1000, 340]];
+var ANCHO_CUADRO_TORRETA = 340;
+var ALTO_CUADRO_TORRETA = 183;
+var PIES_TORRETA = 170;        // donde toca el suelo dentro del cuadro
+var CENTRO_TORRETA = 105;      // centro del soldado y la base (eje para voltearla)
+var BOCA_CANON = [240, 78];    // punta del cañón dentro del cuadro
+var ESCALA_TORRETA = 0.45;
+
+var TORRETA = {
+    x: 2250,              // al final del tercer tramo, antes del agua
+    alcance: 560,         // empieza a disparar cuando el Tilcayo está así de cerca
+    cadencia: 1500,       // ms entre disparos
+    velocidadBala: 380,
+    vida: 3               // espadazos para destruirla
+};
+
+// ---- Jefe final ----
+// Las 4 hojas del jefe tienen cuadros de distinto ancho y tamaño.
+// Cada cuadro: [x, ancho, ancla]; ancla = dónde está el cuerpo dentro del cuadro
+// (así no tiembla al cambiar de cuadro). pies = fila donde pisa el suelo.
+// La escala empareja las hojas para que el jefe mida lo mismo en todas.
+// En las hojas el jefe mira a la IZQUIERDA.
+var HOJAS_JEFE = {
+    camina: {
+        archivo: 'assets/walkjefe.png', alto: 110, pies: 98, escala: 1.45, fps: 14, repetir: -1,
+        cuadros: [[13, 161, 108], [183, 162, 107], [354, 161, 108], [524, 160, 109], [695, 158, 109],
+                  [861, 158, 109], [1028, 158, 109], [1195, 157, 108], [1361, 160, 109], [1530, 161, 109]]
+    },
+    carga: {
+        archivo: 'assets/cargajefe.png', alto: 190, pies: 180, escala: 0.84, fps: 7, repetir: 1,
+        cuadros: [[14, 304, 215], [337, 313, 221], [668, 301, 218], [988, 321, 217]]
+    },
+    ataque: {
+        archivo: 'assets/ataquejefe.png', alto: 126, pies: 113, escala: 1.36, fps: 16, repetir: 1,
+        cuadros: [[0, 227, 184], [236, 244, 184], [488, 235, 188], [732, 243, 183],
+                  [984, 225, 172], [1218, 249, 184], [1476, 225, 172], [1710, 249, 183]]
+    },
+    risa: {
+        archivo: 'assets/risajefe.png', alto: 140, pies: 136, escala: 1.08, fps: 8, repetir: 2,
+        cuadros: [[10, 235, 171], [261, 231, 167], [507, 232, 168], [754, 234, 170], [1004, 231, 167]]
+    },
+    // Recibe el golpe, se tambalea y cae al suelo (se queda en el último cuadro)
+    muerte: {
+        archivo: 'assets/muerte_jefe.png', alto: 108, pies: 100, escala: 1.5, fps: 8, repetir: 0,
+        cuadros: [[10, 167, 130], [185, 163, 123], [357, 160, 117], [526, 159, 115],
+                  [694, 159, 91], [862, 156, 87], [1027, 157, 87], [1193, 158, 88]]
+    }
+};
+
+var JEFE = {
+    x: 3950,
+    rondaMin: 3650,       // de dónde a dónde camina antes de la pelea
+    rondaMax: 4150,
+    alcance: 380,         // a esta distancia ve al Tilcayo y empieza la pelea
+    distanciaAtaque: 330, // se acerca hasta aquí antes de cargar el arma
+    velocidadRonda: 60,
+    velocidadPelea: 95,
+    velocidadBala: 420,
+    vida: 12,
+    ancho: 70,            // caja de choque (en pantalla)
+    alto: 125,
+    boca: [-138, -60]     // punta del arma, desde los pies (mirando a la izquierda)
+};
+
+// Arena de la pelea: la cámara se queda aquí hasta vencer al jefe
+var ARENA = { inicio: 3440, fin: 4260 };
+var PEDAZO_NIVEL = 3200;   // el dibujo del nivel se parte en texturas de este ancho
+
+// Pirámide escalonada al final del nivel, con la jaula arriba
+var PIRAMIDE = { x1: 4290, x2: 4790, escalones: 6, alto: 42, paso: 30 };
+var CIMA_Y = SUELO_Y - PIRAMIDE.escalones * PIRAMIDE.alto;
+var CENTRO_PIRAMIDE = (PIRAMIDE.x1 + PIRAMIDE.x2) / 2;
+
+// ---- Formas del Tilcayo ----
+// caja = caja de choque en píxeles del cuadro original (256x256)
+var FORMAS = {
+    normal: {
+        textura: 'ticayo-idle', escala: 0.55, anim: 'idle',
+        caja: { ancho: 120, alto: 84, x: 95, y: 94 }      // sin la cola
+    },
+    // En el aire (solo sin poder). La caja mide lo mismo que la normal en pantalla.
+    salto: {
+        textura: 'ticayo-salto', escala: 0.62, anim: null,
+        caja: { ancho: 106, alto: 74, x: 75, y: 91 }
+    },
+    guerrero: {
+        textura: 'ticayo-power', escala: 0.5, anim: 'guerrero-idle',
+        caja: { ancho: 80, alto: 166, x: 88, y: 70 }
+    }
+};
+
+var VELOCIDAD = 230;
+var FUERZA_SALTO = 620;
+
+var config = {
+    type: Phaser.AUTO,
+    width: ANCHO,
+    height: ALTO,
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 1300 },
+            debug: false
+        }
+    },
+    // Créditos → menú → historia → juego (los créditos cargan todos los dibujos)
+    scene: [
+        { key: 'creditos', preload: preload, create: crearCreditos, update: actualizarFondoAnimado },
+        { key: 'menu', create: crearMenu, update: actualizarFondoAnimado },
+        { key: 'historia', create: crearHistoria },
+        { key: 'juego', create: create, update: update }
+    ]
+};
+
+var game = new Phaser.Game(config);
+
+var rnd;          // números aleatorios con semilla (siempre el mismo dibujo)
+var capas = [];   // capas de fondo con parallax
+var aguas = [];   // superficies de agua animadas
+var cursors;
+var teclaSalto;
+var teclaAtaque;
+var teclaR;
+
+var jugador;
+var forma;              // FORMAS.normal o FORMAS.guerrero
+var direccion = 1;      // 1 derecha, -1 izquierda
+var espinas;            // grupo de arbustos de espinas (se pueden cortar)
+var vidas = 3;
+var textoVidas;
+var textoCentro;
+var textoPoder;
+var barraPoder;
+var chispas;
+var invulnerable = false;
+var muriendo = false;
+var gameOver = false;
+var ultimoEnSuelo = 0;
+var poderHasta = 0;     // momento en que se acaba el poder (0 = sin poder)
+var puntoInicio = { x: 110, y: SUELO_Y - 60 };
+var enAireDesde = 0;    // momento en que dejó el suelo (0 = en el suelo)
+var torreta;            // la torreta enemiga (null cuando se destruye)
+var balas;              // balas de la torreta
+var numeroAtaque = 0;   // cuenta los espadazos (cada uno golpea una sola vez)
+var carnes;             // carnes de poder (el jefe suelta una a media pelea)
+var jefe;               // el jefe final
+var muroIzq;            // paredes invisibles de la arena
+var muroDer;
+var barraJefe;
+var textoJefe;
+var jaula;              // la jaula con la familia
+var ganado = false;
+
+// ---- Tormenta: el cielo se pone frío y oscuro y llueve a medida que se acerca el jefe ----
+var TORMENTA = { desde: 2300, hasta: ARENA.inicio };   // x donde empieza y donde está al máximo
+var intensidad = 0;     // 0 = día tranquilo, 1 = tormenta
+var rayos;              // rayos de sol (se apagan con la tormenta)
+var fondoTormenta;      // tiñe de azul frío el fondo (cielo, montañas, árboles)
+var nubes;              // oscurece la parte de arriba
+var relampago;          // el rayo dibujado en el cielo
+var tonoFrio;           // un velo azul oscuro sobre todo
+var fondoRojo;          // al llegar al jefe el cielo se vuelve rojo
+var tonoRojo;
+var rojo = 0;           // 0 = tormenta fría, 1 = cielo rojo del jefe
+var FRIO_BASE = 0.3;    // el día ya empieza un poco frío
+var ROJO_DESDE = 3000;  // desde aquí el cielo empieza a ponerse rojo (máximo en la arena)
+var lluvia;
+var proximoRelampago = 0;
+
+// ---- Día alegre del final (después del rescate) ----
+var alegre;             // { v: 0 a 1 }, se anima con un tween
+var arcoiris;
+var luzAlegre;          // luz cálida sobre el fondo
+var brilloAlegre;       // brillo dorado sobre todo
+
+// ---- Comida que cae del cielo de vez en cuando ----
+var proximaComida = 0;
+
+// ---- Jaula de la arena: plataformas [x centro, y arriba] y cajas [x centro] ----
+var ARENA_PLATAFORMAS = [[ARENA.inicio + 170, 410], [(ARENA.inicio + ARENA.fin) / 2, 315], [ARENA.fin - 170, 410]];
+var ARENA_CAJAS = [ARENA.inicio + 64, ARENA.fin - 64];
+var GROSOR_BARROTES = 30;
+
+// Orden de dibujo: el clima va encima del juego (y de la jaula, que aparece después)
+// y los textos encima de todo
+var CAPA_CLIMA = 5;
+var CAPA_TEXTO = 10;
+
+var AUTORES = ['Jaime Dennis Guzman', 'Leonardo Herrera Dante', 'Neils Laime Balderrama'];
+
+function preload ()
+{
+    // 21 cuadros de 256x256 en una cuadrícula de 5x5
+    this.load.spritesheet('ticayo-idle', 'assets/Ticayo_idle.png', { frameWidth: 256, frameHeight: 256, endFrame: 20 });
+    // 25 cuadros de 256x256: 0-5 guardia, 6-24 ataque con espadas
+    this.load.spritesheet('ticayo-power', 'assets/Ticayo_power.png', { frameWidth: 256, frameHeight: 256, endFrame: 24 });
+    // Estas dos hojas tienen cuadros desparejos: se cargan como imagen y
+    // los cuadros se arman a mano en crearCuadros()
+    this.load.image('ticayo-salto-hoja', 'assets/Tilcayo_jump.png');
+    // Caminar y saltar (normal y guerrero): se alinean en crearCuadros()
+    this.load.image('ticayo-camina-hoja', 'assets/Tilcayo_walk.png');
+    this.load.image('guerrero-camina-hoja', 'assets/power_walk.png');
+    this.load.image('guerrero-salto-hoja', 'assets/power_jump.png');
+    this.load.image('torreta', 'assets/torreta.png');
+    this.load.image('boton-jugar', 'assets/boton_jugar.png');
+    for (var hoja in HOJAS_JEFE)
+    {
+        this.load.image('jefe-' + hoja, HOJAS_JEFE[hoja].archivo);
+    }
+}
+
+function create ()
+{
+    rnd = new Phaser.Math.RandomDataGenerator(['selva-ticayo']);
+    capas = [];
+    aguas = [];
+    invulnerable = false;
+    muriendo = false;
+    gameOver = false;
+    poderHasta = 0;
+    enAireDesde = 0;
+    forma = undefined;
+    ganado = false;
+    puntoInicio = { x: 110, y: SUELO_Y - 60 };
+
+    prepararRecursos(this);
+
+    // ---- Capas de fondo (de la más lejana a la más cercana) ----
+    this.add.image(0, 0, 'cielo').setOrigin(0).setScrollFactor(0);
+    agregarCapa(this, 'montanas', 0.1);
+    alegre = { v: 0 };
+    arcoiris = this.add.image(ANCHO * 0.62, 330, 'arcoiris').setScrollFactor(0).setAlpha(0);
+    agregarCapa(this, 'arboles-lejanos', 0.25);
+    agregarCapa(this, 'arboles-grandes', 0.5);
+
+    // Tormenta: capas que se van mostrando con la intensidad
+    fondoTormenta = this.add.rectangle(0, 0, ANCHO, ALTO, 0x5a7bb0).setOrigin(0).setScrollFactor(0)
+        .setBlendMode(Phaser.BlendModes.MULTIPLY).setAlpha(0);
+    fondoRojo = this.add.rectangle(0, 0, ANCHO, ALTO, 0xd9442e).setOrigin(0).setScrollFactor(0)
+        .setBlendMode(Phaser.BlendModes.MULTIPLY).setAlpha(0);
+    nubes = this.add.image(0, 0, 'nubes-tormenta').setOrigin(0).setScrollFactor(0).setAlpha(0);
+    rojo = 0;
+    relampago = this.add.graphics().setScrollFactor(0);
+    luzAlegre = this.add.rectangle(0, 0, ANCHO, ALTO, 0xfff0b0).setOrigin(0).setScrollFactor(0)
+        .setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+    proximaComida = 0;
+    intensidad = 0;
+    proximoRelampago = 0;
+
+    // Rayos de sol entre los árboles
+    // (su brillo se calcula en actualizarTormenta: pulsa y se apaga con la tormenta)
+    rayos = this.add.image(0, 0, 'rayos').setOrigin(0).setScrollFactor(0).setBlendMode(Phaser.BlendModes.ADD);
+
+    // ---- El nivel (se mueve junto con la cámara) ----
+    // (en pedazos: una textura de más de 4096 px no entra en todas las tarjetas de video)
+    for (var p = 0; p * PEDAZO_NIVEL < ANCHO_NIVEL; p++)
+    {
+        this.add.image(p * PEDAZO_NIVEL, 0, 'nivel-' + p).setOrigin(0);
+    }
+    crearAgua(this);
+
+    // ---- Físicas del nivel (cajas invisibles encima del dibujo) ----
+    this.physics.world.setBounds(0, 0, ANCHO_NIVEL, ALTO);
+    this.physics.world.setBoundsCollision(true, true, true, false);   // abajo abierto
+
+    var solidos = this.physics.add.staticGroup();
+    var ramas = this.physics.add.staticGroup();
+    var charcos = this.physics.add.staticGroup();
+    espinas = this.physics.add.staticGroup();
+
+    TRAMOS_SUELO.forEach(function (t) {
+        solidos.add(caja(this, t[0], SUELO_Y, t[1] - t[0], ALTO - SUELO_Y));
+    }, this);
+
+    RAMAS.forEach(function (r) {
+        var rama = caja(this, r[0], r[1] - 2, r[2], 16);
+        ramas.add(rama);
+        // Solo chocan por arriba: se pueden atravesar saltando desde abajo
+        rama.body.checkCollision.down = false;
+        rama.body.checkCollision.left = false;
+        rama.body.checkCollision.right = false;
+    }, this);
+
+    OBSTACULOS.forEach(function (o) {
+        var t = CAJAS_OBSTACULO[o.tipo];
+        var c = caja(this, o.x - t[0] / 2, SUELO_Y - t[1], t[0], t[1]);
+        if (o.tipo === 'espinas')
+        {
+            // Las espinas son una imagen aparte para poder cortarlas
+            c.dibujo = this.add.image(o.x, SUELO_Y + 4, 'espinas').setOrigin(0.5, 1);
+            espinas.add(c);
+        }
+        else
+        {
+            solidos.add(c);
+        }
+    }, this);
+
+    for (var i = 0; i < TRAMOS_SUELO.length - 1; i++)
+    {
+        var x1 = TRAMOS_SUELO[i][1];
+        var x2 = TRAMOS_SUELO[i + 1][0];
+        charcos.add(caja(this, x1, AGUA_Y + 15, x2 - x1, ALTO - AGUA_Y));
+    }
+
+    // Escalones de la pirámide (cada uno es una capa más angosta encima de la otra)
+    for (var e = 0; e < PIRAMIDE.escalones; e++)
+    {
+        var margen = e * PIRAMIDE.paso;
+        solidos.add(caja(this, PIRAMIDE.x1 + margen, SUELO_Y - (e + 1) * PIRAMIDE.alto,
+            PIRAMIDE.x2 - PIRAMIDE.x1 - margen * 2, PIRAMIDE.alto));
+    }
+
+    // Paredes invisibles de la arena: la derecha tapa la pirámide hasta vencer al jefe,
+    // la izquierda se cierra cuando empieza la pelea
+    muroDer = caja(this, ARENA.fin - GROSOR_BARROTES, 0, GROSOR_BARROTES, SUELO_Y);
+    muroIzq = null;
+
+    // ---- Carnes de poder ----
+    carnes = this.physics.add.staticGroup();
+    CARNES.forEach(function (c) {
+        crearCarne(this, c[0], c[1], c[2]);
+    }, this);
+
+
+    // ---- Torreta, jefe y jaula (antes del Tilcayo para que queden detrás de él) ----
+    crearTorreta(this);
+    crearJaula(this);
+    crearJefe(this);
+
+    // ---- Tilcayo ----
+    jugador = this.physics.add.sprite(puntoInicio.x, puntoInicio.y, 'ticayo-idle');
+    jugador.setCollideWorldBounds(true);
+    ponerForma(jugador, FORMAS.normal);
+
+    torreta.colisor = this.physics.add.collider(jugador, torreta.caja);
+    this.physics.add.collider(jugador, muroDer);
+    this.physics.add.overlap(jugador, jaula.zona, rescatarFamilia, null, this);
+
+    this.physics.add.collider(jugador, solidos);
+    this.physics.add.collider(jugador, ramas);
+    this.physics.add.overlap(jugador, espinas, tocarEspinas, null, this);
+    this.physics.add.overlap(jugador, charcos, caerAlAgua, null, this);
+    this.physics.add.overlap(jugador, carnes, comerCarne, null, this);
+
+    // Balas de la torreta: se rompen contra el suelo y los obstáculos
+    balas = this.physics.add.group({ allowGravity: false });
+    this.physics.add.collider(balas, solidos, romperBala, null, this);
+    this.physics.add.overlap(jugador, balas, tocarBala, null, this);
+
+    // Chispas para efectos (comer, cortar espinas)
+    chispas = this.add.particles(0, 0, 'luz', {
+        speed: { min: 80, max: 260 },
+        lifespan: 600,
+        scale: { start: 1.2, end: 0 },
+        blendMode: 'ADD',
+        emitting: false
+    });
+
+    // Luciérnagas
+    this.add.particles(0, 0, 'luz', {
+        x: { min: 0, max: ANCHO_NIVEL },
+        y: { min: 150, max: 500 },
+        lifespan: 4000,
+        speedX: { min: -15, max: 15 },
+        speedY: { min: -15, max: 10 },
+        scale: { start: 0.7, end: 0 },
+        alpha: { start: 1, end: 0 },
+        frequency: 90,
+        blendMode: 'ADD'
+    });
+
+    // ---- Primer plano: helechos y hojas colgantes (van más rápido que la cámara) ----
+    agregarCapa(this, 'follaje-frente', 1.3);
+
+    // Lluvia inclinada (fija a la pantalla); arranca apagada
+    lluvia = this.add.particles(0, 0, 'gota', {
+        x: { min: -100, max: ANCHO + 200 },
+        y: -20,
+        lifespan: 900,
+        speedY: { min: 750, max: 950 },
+        speedX: { min: -330, max: -260 },
+        rotate: 19,
+        alpha: { min: 0.35, max: 0.8 },
+        scaleY: { min: 0.7, max: 1.3 },
+        frequency: 40,
+        emitting: false
+    }).setScrollFactor(0).setDepth(CAPA_CLIMA);
+    tonoFrio = this.add.rectangle(0, 0, ANCHO, ALTO, 0x0b1a33).setOrigin(0).setScrollFactor(0).setAlpha(0).setDepth(CAPA_CLIMA);
+    tonoRojo = this.add.rectangle(0, 0, ANCHO, ALTO, 0x6a0505).setOrigin(0).setScrollFactor(0).setAlpha(0).setDepth(CAPA_CLIMA);
+    brilloAlegre = this.add.rectangle(0, 0, ANCHO, ALTO, 0xffe7a0).setOrigin(0).setScrollFactor(0)
+        .setBlendMode(Phaser.BlendModes.ADD).setAlpha(0).setDepth(CAPA_CLIMA);
+
+    // Hojas que caen
+    this.add.particles(0, 0, 'hoja', {
+        x: { min: 0, max: ANCHO },
+        y: -10,
+        lifespan: 14000,
+        speedY: { min: 25, max: 55 },
+        speedX: { min: -35, max: 35 },
+        rotate: { start: 0, end: 540 },
+        scale: { min: 0.8, max: 1.4 },
+        frequency: 700
+    }).setScrollFactor(0);
+
+    // Viñeta (oscurece los bordes, da look más "pro")
+    this.add.image(0, 0, 'vineta').setOrigin(0).setScrollFactor(0).setDepth(CAPA_CLIMA);
+
+    // ---- Cámara ----
+    this.cameras.main.setBounds(0, 0, ANCHO_NIVEL, ALTO);
+    this.cameras.main.setZoom(1);
+    this.cameras.main.fadeIn(500, 0, 0, 0);
+    this.cameras.main.startFollow(jugador, true, 0.12, 0.12);
+    this.cameras.main.setDeadzone(100, 120);
+
+    // ---- Controles ----
+    cursors = this.input.keyboard.createCursorKeys();
+    teclaSalto = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    teclaAtaque = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
+    teclaR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+
+    // ---- HUD ----
+    var estilo = { fontSize: '22px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 5 };
+    textoVidas = this.add.text(16, 16, '', estilo).setScrollFactor(0);
+    textoPoder = this.add.text(16, 48, '', { fontSize: '18px', fontStyle: 'bold', color: '#ffd166', stroke: '#000000', strokeThickness: 5 }).setScrollFactor(0);
+    barraPoder = this.add.graphics().setScrollFactor(0);
+    barraJefe = this.add.graphics().setScrollFactor(0);
+    textoJefe = this.add.text(ANCHO / 2, 40, '', { fontSize: '16px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 4 })
+        .setOrigin(0.5, 0).setScrollFactor(0);
+    textoCentro = this.add.text(ANCHO / 2, ALTO / 2, '', { fontSize: '40px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 7, align: 'center' })
+        .setOrigin(0.5).setScrollFactor(0);
+    [textoVidas, textoPoder, barraPoder, barraJefe, textoJefe, textoCentro].forEach(function (o) {
+        o.setDepth(CAPA_TEXTO);
+    });
+    actualizarHUD();
+}
+
+function update (time)
+{
+    var cam = this.cameras.main;
+
+    // Parallax: cada capa se mueve a su propia velocidad
+    capas.forEach(function (capa) {
+        capa.sprite.tilePositionX = cam.scrollX * capa.factor;
+    });
+
+    // Olas del agua
+    aguas.forEach(function (agua) {
+        agua.claro.tilePositionX += 0.4;
+        agua.oscuro.tilePositionX -= 0.25;
+    });
+
+    actualizarTormenta(this, time);
+
+    if (gameOver)
+    {
+        if (ganado)
+        {
+            actualizarFinal();
+        }
+        if (Phaser.Input.Keyboard.JustDown(teclaR))
+        {
+            vidas = 3;
+            this.scene.restart();
+        }
+        return;
+    }
+
+    if (muriendo)
+    {
+        return;
+    }
+
+    // ---- Tiempo del poder ----
+    if (poderHasta > 0)
+    {
+        var restante = poderHasta - time;
+        if (restante <= 0)
+        {
+            quitarPoder(this);
+        }
+        else
+        {
+            dibujarBarraPoder(restante);
+            // Parpadea en los últimos 5 segundos para avisar
+            if (!invulnerable)
+            {
+                jugador.setAlpha(restante < 5000 && Math.floor(time / 120) % 2 === 0 ? 0.5 : 1);
+            }
+        }
+    }
+
+    var enSuelo = jugador.body.blocked.down || jugador.body.touching.down;
+    if (enSuelo)
+    {
+        ultimoEnSuelo = time;
+    }
+
+    // Caminar
+    if (cursors.left.isDown)
+    {
+        jugador.setVelocityX(-VELOCIDAD);
+        mirarA(jugador, -1);
+    }
+    else if (cursors.right.isDown)
+    {
+        jugador.setVelocityX(VELOCIDAD);
+        mirarA(jugador, 1);
+    }
+    else
+    {
+        jugador.setVelocityX(0);
+    }
+
+    // Saltar (con 100 ms de margen al salir de un borde)
+    var saltar = Phaser.Input.Keyboard.JustDown(cursors.up) || Phaser.Input.Keyboard.JustDown(teclaSalto);
+    if (saltar && time - ultimoEnSuelo < 100)
+    {
+        jugador.setVelocityY(-FUERZA_SALTO);
+        ultimoEnSuelo = 0;
+    }
+
+    // Salto variable: si suelta el botón antes, salta más bajo
+    if (!cursors.up.isDown && !teclaSalto.isDown && jugador.body.velocity.y < -250)
+    {
+        jugador.setVelocityY(-250);
+    }
+
+    // ---- Forma de salto (solo sin poder) ----
+    if (enSuelo)
+    {
+        enAireDesde = 0;
+    }
+    else if (enAireDesde === 0)
+    {
+        enAireDesde = time;
+    }
+
+    // Saltó, o lleva un ratito cayendo (así no parpadea en los bordes)
+    var enAire = !enSuelo && (jugador.body.velocity.y < 0 || time - enAireDesde > 80);
+
+    if (forma !== FORMAS.guerrero)
+    {
+        if (enAire && forma !== FORMAS.salto)
+        {
+            ponerForma(jugador, FORMAS.salto);
+        }
+        else if (!enAire && forma === FORMAS.salto)
+        {
+            ponerForma(jugador, FORMAS.normal);
+        }
+
+        if (forma === FORMAS.salto)
+        {
+            jugador.setFrame(cuadroSalto(jugador.body.velocity.y));
+        }
+    }
+
+    // ---- Torreta y balas ----
+    actualizarTorreta(this, time);
+    actualizarJefe(this, time);
+    actualizarComida(this, time);
+    balas.getChildren().slice().forEach(function (b) {
+        if (b.x < cam.scrollX - 50 || b.x > cam.scrollX + ANCHO + 50)
+        {
+            b.destroy();
+        }
+    });
+
+    // ---- Ataque (solo con poder) ----
+    var atacando = jugador.anims.isPlaying && jugador.anims.currentAnim.key === 'ataque';
+    if (forma === FORMAS.guerrero && !atacando && Phaser.Input.Keyboard.JustDown(teclaAtaque))
+    {
+        jugador.anims.play('ataque');
+        Sonido.espada();
+        numeroAtaque++;
+        atacando = true;
+    }
+
+    if (atacando)
+    {
+        // Los cuadros 12-19 son el golpe de espada
+        var cuadro = jugador.anims.currentFrame.index + 5;
+        if (cuadro >= 12 && cuadro <= 19)
+        {
+            golpearEspinas(this);
+            golpearTorreta(this);
+            golpearJefeConEspada(this, time);
+        }
+    }
+    else if (forma === FORMAS.guerrero && enAire)
+    {
+        // Guerrero en el aire: el cuadro depende de la velocidad, como el gato
+        jugador.anims.stop();
+        jugador.setTexture('guerrero-salto', cuadroSaltoGuerrero(jugador.body.velocity.y));
+    }
+    else if (forma.anim)
+    {
+        var caminando = jugador.body.velocity.x !== 0;
+        if (forma === FORMAS.guerrero)
+        {
+            jugador.anims.play(caminando ? 'guerrero-camina' : 'guerrero-idle', true);
+        }
+        else
+        {
+            jugador.anims.play(caminando ? 'camina' : 'idle', true);
+        }
+    }
+}
+
+// Cuadros del guerrero en el aire: 0-2 subiendo, 3-5 bajando
+function cuadroSaltoGuerrero (vy)
+{
+    if (vy < 0)
+    {
+        return Math.round(Phaser.Math.Clamp(1 + vy / FUERZA_SALTO, 0, 1) * 2);
+    }
+    return 3 + Math.round(Phaser.Math.Clamp(vy / 700, 0, 1) * 2);
+}
+
+// Animaciones (son globales: sirven para el menú, la historia y el juego)
+function crearAnimaciones (scene)
+{
+    scene.anims.create({
+        key: 'idle',
+        frames: scene.anims.generateFrameNumbers('ticayo-idle', { start: 0, end: 20 }),
+        frameRate: 12,
+        repeat: -1
+    });
+    scene.anims.create({
+        key: 'guerrero-idle',
+        frames: scene.anims.generateFrameNumbers('ticayo-power', { start: 0, end: 5 }),
+        frameRate: 8,
+        yoyo: true,
+        repeat: -1
+    });
+    scene.anims.create({
+        key: 'camina',
+        frames: scene.anims.generateFrameNumbers('ticayo-camina', { start: 0, end: 24 }),
+        frameRate: 30,
+        repeat: -1
+    });
+    scene.anims.create({
+        key: 'guerrero-camina',
+        frames: scene.anims.generateFrameNumbers('guerrero-camina', { start: 0, end: 11 }),
+        frameRate: 14,
+        repeat: -1
+    });
+    scene.anims.create({
+        key: 'ataque',
+        frames: scene.anims.generateFrameNumbers('ticayo-power', { start: 6, end: 24 }),
+        frameRate: 32
+    });
+    scene.anims.create({
+        key: 'torreta-disparo',
+        frames: [1, 2, 3, 0].map(function (n) { return { key: 'torreta', frame: 'f' + n }; }),
+        frameRate: 18
+    });
+    for (var hoja in HOJAS_JEFE)
+    {
+        var datos = HOJAS_JEFE[hoja];
+        var clave = 'jefe-' + hoja;
+        scene.anims.create({
+            key: clave,
+            frames: datos.cuadros.map(function (c, n) { return { key: clave, frame: n }; }),
+            frameRate: datos.fps,
+            repeat: datos.repetir
+        });
+    }
+}
+
+// Dibujos, cuadros y animaciones: se arman una sola vez (en el menú)
+function prepararRecursos (scene)
+{
+    if (scene.textures.exists('cielo'))
+    {
+        return;
+    }
+    rnd = new Phaser.Math.RandomDataGenerator(['selva-ticayo']);
+    crearTexturas(scene);
+    crearCuadros(scene);
+    crearAnimaciones(scene);
+}
+
+// Elige el cuadro del salto según la velocidad vertical:
+// 4-11 subiendo (se estira), 12-19 bajando (se prepara para caer)
+function cuadroSalto (vy)
+{
+    var t;
+    if (vy < 0)
+    {
+        t = Phaser.Math.Clamp(1 + vy / FUERZA_SALTO, 0, 1);
+        return 4 + Math.round(t * 7);
+    }
+    t = Phaser.Math.Clamp(vy / 700, 0, 1);
+    return 12 + Math.round(t * 7);
+}
+
+// Caja invisible con cuerpo físico estático
+function caja (scene, x, y, w, h)
+{
+    var z = scene.add.zone(x + w / 2, y + h / 2, w, h);
+    scene.physics.add.existing(z, true);
+    return z;
+}
+
+// Cambia la forma del Tilcayo (normal o guerrero) sin moverle los pies
+function ponerForma (sprite, nueva)
+{
+    var pies = sprite.body.bottom;
+    var cambio = forma !== undefined && forma !== nueva;
+
+    forma = nueva;
+    sprite.setTexture(nueva.textura, 0);
+    sprite.setScale(nueva.escala);
+    sprite.body.setSize(nueva.caja.ancho, nueva.caja.alto, false);
+    mirarA(sprite, direccion);
+    if (nueva.anim)
+    {
+        sprite.anims.play(nueva.anim);
+    }
+    else
+    {
+        sprite.anims.stop();   // el salto elige su cuadro según la velocidad
+    }
+
+    if (cambio)
+    {
+        // El centro del cuadro está en 128: pone los pies donde estaban
+        // (y conserva la velocidad, para poder cambiar de forma en el aire)
+        var vx = sprite.body.velocity.x;
+        var vy = sprite.body.velocity.y;
+        sprite.y = pies - (nueva.caja.y + nueva.caja.alto - 128) * nueva.escala;
+        sprite.body.reset(sprite.x, sprite.y);
+        sprite.setVelocity(vx, vy);
+    }
+}
+
+// Voltea al Tilcayo y acomoda su caja de choque
+function mirarA (sprite, dir)
+{
+    direccion = dir;
+    sprite.setFlipX(dir < 0);
+    var c = forma.caja;
+    var offsetX = dir < 0 ? 256 - c.x - c.ancho : c.x;
+    sprite.body.setOffset(offsetX, c.y);
+}
+
+function comerCarne (j, carne)
+{
+    if (muriendo || gameOver)
+    {
+        return;
+    }
+
+    chispas.explode(20, carne.x, carne.y);
+    Sonido.comer();
+    carne.brillo.destroy();
+    this.tweens.killTweensOf(carne);
+    carne.destroy();
+
+    activarPoder(this);
+}
+
+function activarPoder (scene)
+{
+    var yaTenia = poderHasta > 0;
+    poderHasta = scene.time.now + DURACION_PODER;
+
+    if (yaTenia)
+    {
+        mostrarAviso(scene, '+30 s', '#ffd166');
+        return;
+    }
+
+    ponerForma(jugador, FORMAS.guerrero);
+    scene.cameras.main.flash(250, 255, 220, 150);
+    scene.cameras.main.shake(200, 0.006);
+    mostrarAviso(scene, '¡PODER DE ATAQUE!\nX para atacar', '#ffd166');
+}
+
+function quitarPoder (scene)
+{
+    poderHasta = 0;
+    barraPoder.clear();
+    textoPoder.setText('');
+    jugador.setAlpha(1);
+    if (forma === FORMAS.guerrero)
+    {
+        ponerForma(jugador, FORMAS.normal);
+        chispas.explode(12, jugador.x, jugador.y);
+    }
+}
+
+// Rectángulo que alcanza la espada, delante del Tilcayo
+function zonaEspada ()
+{
+    var b = jugador.body;
+    var alcance = 70;
+    return new Phaser.Geom.Rectangle(
+        direccion > 0 ? b.right - 10 : b.left - alcance + 10,
+        b.top + 20,
+        alcance,
+        b.height - 20
+    );
+}
+
+// Revisa si la espada toca algún arbusto de espinas y lo corta
+function golpearEspinas (scene)
+{
+    var zona = zonaEspada();
+
+    espinas.getChildren().slice().forEach(function (e) {
+        if (Phaser.Geom.Intersects.RectangleToRectangle(zona, e.getBounds()))
+        {
+            chispas.explode(16, e.x, e.y);
+            Sonido.corte();
+            scene.tweens.add({
+                targets: e.dibujo, scaleY: 0, alpha: 0, duration: 250,
+                onComplete: function (tween, targets) { targets[0].destroy(); }
+            });
+            e.destroy();
+        }
+    });
+}
+
+function mostrarAviso (scene, texto, color)
+{
+    var aviso = scene.add.text(ANCHO / 2, 140, texto, {
+        fontSize: '34px', fontStyle: 'bold', color: color, stroke: '#000000', strokeThickness: 7, align: 'center'
+    }).setOrigin(0.5).setScrollFactor(0).setScale(0.3).setDepth(CAPA_TEXTO);
+
+    scene.tweens.add({ targets: aviso, scale: 1, duration: 250, ease: 'Back.easeOut' });
+    scene.tweens.add({ targets: aviso, alpha: 0, y: 110, delay: 1400, duration: 500, onComplete: function () { aviso.destroy(); } });
+}
+
+function dibujarBarraPoder (restante)
+{
+    var ancho = 180;
+    var parte = restante / DURACION_PODER;
+    textoPoder.setText('PODER ' + Math.ceil(restante / 1000) + ' s');
+    barraPoder.clear();
+    barraPoder.fillStyle(0x000000, 0.6);
+    barraPoder.fillRoundedRect(14, 72, ancho + 4, 14, 5);
+    barraPoder.fillStyle(parte < 0.17 ? 0xff5a36 : 0xffb703, 1);
+    barraPoder.fillRoundedRect(16, 74, ancho * parte, 10, 4);
+}
+
+function perderVida (scene)
+{
+    vidas--;
+    actualizarHUD();
+    if (vidas <= 0)
+    {
+        gameOver = true;
+        scene.physics.pause();
+        jugador.anims.stop();
+        jugador.setTint(0xff6666);
+        textoCentro.setText('GAME OVER\nPresiona R para reiniciar');
+        return false;
+    }
+    return true;
+}
+
+function tocarEspinas (j, espina)
+{
+    herir(this, espina.x);
+}
+
+// El Tilcayo recibe un golpe que viene desde la posición desdeX
+function herir (scene, desdeX)
+{
+    if (invulnerable || muriendo || gameOver)
+    {
+        return;
+    }
+
+    Sonido.herido();
+
+    // Con poder: pierde el poder en vez de una vida (como Mario)
+    if (poderHasta > 0)
+    {
+        quitarPoder(scene);
+    }
+    else if (!perderVida(scene))
+    {
+        return;
+    }
+
+    // Empujón hacia atrás y parpadeo
+    invulnerable = true;
+    var dir = jugador.x < desdeX ? -1 : 1;
+    jugador.setVelocity(dir * 260, -380);
+    jugador.setTint(0xff6666);
+    scene.tweens.add({ targets: jugador, alpha: 0.3, duration: 100, yoyo: true, repeat: 7 });
+    scene.time.delayedCall(1600, function () {
+        invulnerable = false;
+        jugador.clearTint().setAlpha(1);
+    });
+}
+
+// =====================================================
+//  TORRETA
+// =====================================================
+
+function crearTorreta (scene)
+{
+    var sprite = scene.add.sprite(TORRETA.x, SUELO_Y + 2, 'torreta', 'f0').setScale(ESCALA_TORRETA);
+
+    // Caja de choque: el soldado con la base (sin el cañón que sobresale)
+    var ancho = 190 * ESCALA_TORRETA;
+    var alto = (PIES_TORRETA - 40) * ESCALA_TORRETA;
+    var cajaTorreta = caja(scene, TORRETA.x - ancho / 2, SUELO_Y - alto, ancho, alto);
+
+    torreta = {
+        sprite: sprite,
+        caja: cajaTorreta,
+        vida: TORRETA.vida,
+        dir: -1,
+        proximoDisparo: 0,
+        ultimoGolpe: -1,
+        colisor: null
+    };
+    mirarTorreta(-1);
+}
+
+// Voltea la torreta sobre el eje del soldado
+function mirarTorreta (dir)
+{
+    torreta.dir = dir;
+    torreta.sprite.setFlipX(dir < 0);
+    var centro = dir < 0 ? ANCHO_CUADRO_TORRETA - CENTRO_TORRETA : CENTRO_TORRETA;
+    torreta.sprite.setOrigin(centro / ANCHO_CUADRO_TORRETA, PIES_TORRETA / ALTO_CUADRO_TORRETA);
+}
+
+function actualizarTorreta (scene, time)
+{
+    if (!torreta)
+    {
+        return;
+    }
+
+    var distancia = jugador.x - TORRETA.x;
+    if (Math.abs(distancia) > TORRETA.alcance || muriendo)
+    {
+        // Fuera de alcance: al entrar espera un momento antes del primer disparo
+        torreta.proximoDisparo = time + 600;
+        return;
+    }
+
+    mirarTorreta(distancia < 0 ? -1 : 1);
+
+    if (time >= torreta.proximoDisparo)
+    {
+        torreta.proximoDisparo = time + TORRETA.cadencia;
+        dispararTorreta(scene);
+    }
+}
+
+function dispararTorreta (scene)
+{
+    torreta.sprite.anims.play('torreta-disparo');
+    Sonido.disparo(0.35);
+
+    // La boca del cañón, pasada a coordenadas del mundo
+    var bx = TORRETA.x + (BOCA_CANON[0] - CENTRO_TORRETA) * ESCALA_TORRETA * torreta.dir;
+    var by = SUELO_Y + 2 - (PIES_TORRETA - BOCA_CANON[1]) * ESCALA_TORRETA;
+
+    var bala = balas.create(bx, by, 'bala');
+    bala.setFlipX(torreta.dir < 0);
+    bala.body.setSize(14, 6);
+    bala.setVelocityX(TORRETA.velocidadBala * torreta.dir);
+}
+
+function romperBala (bala)
+{
+    chispas.explode(6, bala.x, bala.y);
+    bala.destroy();
+}
+
+function tocarBala (j, bala)
+{
+    var desde = bala.x - bala.body.velocity.x;   // de dónde venía
+    if (bala.delJefe && jefe)
+    {
+        jefe.acerto = true;
+    }
+    romperBala(bala);
+    herir(this, desde);
+}
+
+// Revisa si la espada le pega a la torreta (una vez por espadazo)
+function golpearTorreta (scene)
+{
+    if (!torreta || torreta.ultimoGolpe === numeroAtaque)
+    {
+        return;
+    }
+    if (!Phaser.Geom.Intersects.RectangleToRectangle(zonaEspada(), torreta.caja.getBounds()))
+    {
+        return;
+    }
+
+    torreta.ultimoGolpe = numeroAtaque;
+    torreta.vida--;
+    Sonido.golpe();
+    chispas.explode(14, torreta.caja.x, torreta.caja.y);
+    scene.cameras.main.shake(120, 0.005);
+
+    if (torreta.vida > 0)
+    {
+        torreta.sprite.setTintFill(0xffffff);
+        scene.time.delayedCall(90, function () {
+            if (torreta) torreta.sprite.clearTint();
+        });
+        return;
+    }
+
+    // Destruida
+    var t = torreta;
+    torreta = null;
+    t.colisor.destroy();
+    t.caja.destroy();
+    chispas.explode(40, t.sprite.x, t.sprite.y - 40);
+    scene.cameras.main.flash(200, 255, 200, 120);
+    t.sprite.anims.stop();
+    t.sprite.setTint(0x555555);
+    scene.tweens.add({
+        targets: t.sprite, alpha: 0, angle: 12 * -t.dir, y: t.sprite.y + 10, duration: 700,
+        onComplete: function () { t.sprite.destroy(); }
+    });
+    mostrarAviso(scene, '¡TORRETA DESTRUIDA!', '#7ee081');
+}
+
+function caerAlAgua ()
+{
+    if (muriendo || gameOver)
+    {
+        return;
+    }
+    muriendo = true;
+
+    if (poderHasta > 0)
+    {
+        quitarPoder(this);
+    }
+
+    jugador.setVelocity(0, 0);
+    jugador.body.allowGravity = false;
+    jugador.setTint(0x6fa8ff);
+    this.tweens.add({ targets: jugador, y: jugador.y + 25, alpha: 0.3, duration: 600 });
+
+    if (!perderVida(this))
+    {
+        return;
+    }
+
+    this.time.delayedCall(900, function () {
+        jugador.clearTint().setAlpha(1).setPosition(puntoInicio.x, puntoInicio.y);
+        jugador.body.allowGravity = true;
+        mirarA(jugador, 1);
+        muriendo = false;
+    });
+}
+
+function actualizarHUD ()
+{
+    textoVidas.setText('Vidas: ' + '♥ '.repeat(Math.max(vidas, 0)));
+}
+
+function agregarCapa (scene, clave, factor)
+{
+    var sprite = scene.add.tileSprite(0, 0, ANCHO, ALTO, clave).setOrigin(0).setScrollFactor(0);
+    capas.push({ sprite: sprite, factor: factor });
+}
+
+function crearAgua (scene)
+{
+    for (var i = 0; i < TRAMOS_SUELO.length - 1; i++)
+    {
+        var x1 = TRAMOS_SUELO[i][1];
+        var x2 = TRAMOS_SUELO[i + 1][0];
+        var ancho = x2 - x1;
+
+        // Dos capas de olas que se mueven en sentidos contrarios
+        var oscuro = scene.add.tileSprite(x1, AGUA_Y + 6, ancho, 12, 'ola-oscura').setOrigin(0);
+        var claro = scene.add.tileSprite(x1, AGUA_Y - 3, ancho, 12, 'ola').setOrigin(0);
+        aguas.push({ claro: claro, oscuro: oscuro });
+
+        // Brillos que aparecen y desaparecen
+        for (var b = 0; b < ancho / 25; b++)
+        {
+            var brillo = scene.add.rectangle(x1 + rnd.between(10, ancho - 10), rnd.between(AGUA_Y + 4, ALTO - 20), rnd.between(6, 16), 2, 0xffffff, 0);
+            scene.tweens.add({
+                targets: brillo, fillAlpha: 0.6, duration: rnd.between(600, 1400),
+                yoyo: true, repeat: -1, delay: rnd.between(0, 3000), repeatDelay: rnd.between(500, 2500)
+            });
+        }
+
+        // Nenúfares flotando
+        for (var n = 0; n < ancho / 60; n++)
+        {
+            var nenufar = scene.add.image(x1 + 25 + n * 60 + rnd.between(-10, 10), AGUA_Y + 2, rnd.frac() < 0.3 ? 'nenufar-flor' : 'nenufar');
+            scene.tweens.add({ targets: nenufar, y: AGUA_Y + 5, angle: rnd.between(-4, 4), duration: rnd.between(1400, 2200), yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        }
+    }
+}
+
+// =====================================================
+//  SONIDOS (hechos con Web Audio: no hacen falta archivos)
+//  Si el navegador no tiene Web Audio, no suenan y el juego sigue igual.
+//  El audio se habilita con el primer clic o tecla (en el menú).
+// =====================================================
+
+var Sonido = {
+    maestro: null,
+    ruido: null,         // ruido blanco que se reutiliza (lluvia, disparos, truenos)
+    volLluvia: null,
+    ultimaLluvia: -1,
+
+    ctx: function () {
+        var c = game.sound && game.sound.context;
+        if (!c)
+        {
+            return null;
+        }
+        if (!this.maestro)
+        {
+            this.maestro = c.createGain();
+            this.maestro.gain.value = 0.5;
+            this.maestro.connect(c.destination);
+            var largo = c.sampleRate * 2;
+            this.ruido = c.createBuffer(1, largo, c.sampleRate);
+            var datos = this.ruido.getChannelData(0);
+            for (var i = 0; i < largo; i++) datos[i] = Math.random() * 2 - 1;
+        }
+        return c;
+    },
+
+    // Ráfaga de ruido con un filtro que barre de una frecuencia a otra
+    soplo: function (tipo, desde, hasta, dur, vol, retraso, q)
+    {
+        var c = this.ctx();
+        if (!c) return;
+        var t = c.currentTime + (retraso || 0);
+        var fuente = c.createBufferSource();
+        fuente.buffer = this.ruido;
+        var filtro = c.createBiquadFilter();
+        filtro.type = tipo;
+        filtro.Q.value = q || 1;
+        filtro.frequency.setValueAtTime(desde, t);
+        filtro.frequency.exponentialRampToValueAtTime(hasta, t + dur);
+        var g = c.createGain();
+        g.gain.setValueAtTime(vol, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        fuente.connect(filtro);
+        filtro.connect(g);
+        g.connect(this.maestro);
+        fuente.start(t, Math.random() * 1.5);
+        fuente.stop(t + dur + 0.05);
+    },
+
+    // Una nota: forma de onda, frecuencia inicial y final
+    tono: function (onda, desde, hasta, dur, vol, retraso)
+    {
+        var c = this.ctx();
+        if (!c) return;
+        var t = c.currentTime + (retraso || 0);
+        var o = c.createOscillator();
+        o.type = onda;
+        o.frequency.setValueAtTime(desde, t);
+        if (hasta !== desde) o.frequency.exponentialRampToValueAtTime(hasta, t + dur);
+        var g = c.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(vol, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        o.connect(g);
+        g.connect(this.maestro);
+        o.start(t);
+        o.stop(t + dur + 0.05);
+    },
+
+    // ---- Ataques ----
+    espada: function ()
+    {
+        this.soplo('bandpass', 3500, 500, 0.25, 0.6, 0, 2);   // zas
+        this.tono('sine', 1200, 300, 0.15, 0.06);
+    },
+    corte: function ()
+    {
+        this.soplo('highpass', 2000, 6000, 0.18, 0.4);
+    },
+    golpe: function ()
+    {
+        this.tono('square', 170, 55, 0.16, 0.25);
+        this.soplo('lowpass', 2500, 200, 0.12, 0.5);
+        this.tono('triangle', 1500, 1400, 0.12, 0.08);        // clinc metálico
+    },
+    pisoton: function ()
+    {
+        this.tono('sine', 260, 720, 0.16, 0.3);               // boing
+    },
+    disparo: function (vol)
+    {
+        this.soplo('lowpass', 5000, 300, 0.12, vol);
+        this.tono('sawtooth', 200, 50, 0.1, vol * 0.4);
+    },
+    herido: function ()
+    {
+        this.tono('sawtooth', 420, 140, 0.28, 0.18);
+    },
+    comer: function ()
+    {
+        this.tono('square', 520, 880, 0.08, 0.12);
+        this.tono('square', 880, 1320, 0.1, 0.12, 0.08);
+    },
+    explosion: function ()
+    {
+        this.soplo('lowpass', 1800, 60, 1.4, 0.9, 0, 0.7);
+        this.tono('sine', 110, 30, 0.9, 0.5);
+    },
+
+    // ---- Clima ----
+    trueno: function ()
+    {
+        this.soplo('highpass', 3000, 1500, 0.15, 0.3);         // chasquido
+        this.soplo('lowpass', 700, 60, 2.4, 0.9, 0.25, 0.7);   // retumbe
+    },
+    // Lluvia continua: 0 = callada, 1 = aguacero
+    lluvia: function (fuerza)
+    {
+        var c = this.ctx();
+        if (!c) return;
+        if (!this.volLluvia)
+        {
+            var fuente = c.createBufferSource();
+            fuente.buffer = this.ruido;
+            fuente.loop = true;
+            var grave = c.createBiquadFilter();
+            grave.type = 'highpass';
+            grave.frequency.value = 700;
+            var agudo = c.createBiquadFilter();
+            agudo.type = 'lowpass';
+            agudo.frequency.value = 7000;
+            this.volLluvia = c.createGain();
+            this.volLluvia.gain.value = 0;
+            fuente.connect(grave);
+            grave.connect(agudo);
+            agudo.connect(this.volLluvia);
+            this.volLluvia.connect(this.maestro);
+            fuente.start();
+        }
+        if (Math.abs(fuerza - this.ultimaLluvia) > 0.01)
+        {
+            this.ultimaLluvia = fuerza;
+            this.volLluvia.gain.setTargetAtTime(fuerza * 0.3, c.currentTime, 0.4);
+        }
+    },
+
+    // ---- Música feliz ----
+    fanfarria: function ()
+    {
+        var notas = [392, 523, 659, 784];
+        for (var i = 0; i < notas.length; i++)
+        {
+            this.tono('triangle', notas[i], notas[i], i === 3 ? 0.7 : 0.14, 0.2, 0.5 + i * 0.13);
+        }
+    },
+    melodiaFeliz: function ()
+    {
+        // Do mayor, alegre y saltarina: [nota Hz, duración en tiempos]
+        var melodia = [
+            [523, 1], [659, 1], [784, 1], [1047, 2], [784, 1], [880, 1], [784, 1], [659, 2],
+            [698, 1], [880, 1], [1047, 1], [880, 2], [784, 1], [659, 1], [587, 1], [523, 3]
+        ];
+        var bajos = [131, 131, 175, 196];   // Do, Do, Fa, Sol
+        var tiempo = 0.2;
+        var t = 0;
+        var c = this.ctx();
+        if (!c) return;
+        var self = this;
+        melodia.forEach(function (n) {
+            self.tono('triangle', n[0], n[0], n[1] * tiempo * 0.95, 0.18, t);
+            t += n[1] * tiempo;
+        });
+        bajos.forEach(function (b, i) {
+            self.tono('sine', b, b, 1.5, 0.22, i * 1.6);
+        });
+    }
+};
+
+// =====================================================
+//  MENÚ E HISTORIA
+// =====================================================
+
+// Fondo de selva para el menú y la historia (el comienzo del nivel, quieto)
+function fondoSelva (scene)
+{
+    capas = [];
+    scene.add.image(0, 0, 'cielo').setOrigin(0);
+    agregarCapa(scene, 'montanas', 0.1);
+    agregarCapa(scene, 'arboles-lejanos', 0.25);
+    agregarCapa(scene, 'arboles-grandes', 0.5);
+    var frio = scene.add.rectangle(0, 0, ANCHO, ALTO, 0x5a7bb0).setOrigin(0)
+        .setBlendMode(Phaser.BlendModes.MULTIPLY).setAlpha(FRIO_BASE);
+    var nubesFondo = scene.add.image(0, 0, 'nubes-tormenta').setOrigin(0).setAlpha(0);
+    var sol = scene.add.image(0, 0, 'rayos').setOrigin(0).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.8);
+    scene.add.image(0, 0, 'nivel-0').setOrigin(0);
+    return { frio: frio, nubes: nubesFondo, sol: sol };
+}
+
+// Las capas del fondo se mueven solas despacito
+function actualizarFondoAnimado ()
+{
+    capas.forEach(function (capa) {
+        capa.sprite.tilePositionX += capa.factor * 0.4;
+    });
+}
+
+function luciernagas (scene)
+{
+    scene.add.particles(0, 0, 'luz', {
+        x: { min: 0, max: ANCHO }, y: { min: 150, max: 500 },
+        lifespan: 4000, speedX: { min: -15, max: 15 }, speedY: { min: -15, max: 10 },
+        scale: { start: 0.7, end: 0 }, alpha: { start: 1, end: 0 }, frequency: 120, blendMode: 'ADD'
+    });
+}
+
+// y de un gato (hoja de 256) para que pise el suelo: los pies están 50 px bajo el centro
+function yGato (escala)
+{
+    return SUELO_Y + 2 - 50 * escala;
+}
+
+// Pone al jefe con una de sus hojas (fuera de la pelea: menú e historia)
+function poseJefe (sprite, hoja, dir)
+{
+    var h = HOJAS_JEFE[hoja];
+    sprite.setScale(h.escala);
+    sprite.anims.play('jefe-' + hoja, true);
+    sprite.setFlipX(dir > 0);
+    var ancla = dir > 0 ? h.anchoCuadro - h.ancla : h.ancla;
+    sprite.setOrigin(ancla / h.anchoCuadro, h.pies / h.alto);
+}
+
+// ---- Créditos: lo primero que se ve; pasan solos al menú ----
+function crearCreditos ()
+{
+    var scene = this;
+    prepararRecursos(this);
+    fondoSelva(this);
+    luciernagas(this);
+    this.add.rectangle(0, 0, ANCHO, ALTO, 0x050b14, 0.72).setOrigin(0);
+    this.add.image(0, 0, 'vineta').setOrigin(0);
+
+    var aparecer = function (obj, retraso) {
+        obj.setAlpha(0).setY(obj.y + 20);
+        scene.tweens.add({ targets: obj, alpha: 1, y: obj.y - 20, delay: retraso, duration: 700, ease: 'Sine.easeOut' });
+    };
+
+    aparecer(this.add.text(ANCHO / 2, 150, 'Un juego de', {
+        fontSize: '24px', fontStyle: 'italic', color: '#cfd8e3'
+    }).setOrigin(0.5), 300);
+
+    AUTORES.forEach(function (nombre, i) {
+        aparecer(scene.add.text(ANCHO / 2, 230 + i * 60, nombre, {
+            fontFamily: 'Georgia, serif', fontSize: '36px', fontStyle: 'bold',
+            color: '#ffd166', stroke: '#2b1400', strokeThickness: 7
+        }).setOrigin(0.5), 900 + i * 600);
+    });
+
+    aparecer(this.add.text(ANCHO / 2, 470, 'TILCAYO · El rescate en la selva', {
+        fontSize: '18px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 4
+    }).setOrigin(0.5), 2900);
+
+    this.add.text(ANCHO - 16, ALTO - 14, 'Clic o cualquier tecla para continuar', {
+        fontSize: '14px', fontStyle: 'bold', color: '#ffe8a3', stroke: '#000000', strokeThickness: 4
+    }).setOrigin(1, 1);
+
+    var yendo = false;
+    var alMenu = function () {
+        if (yendo)
+        {
+            return;
+        }
+        yendo = true;
+        scene.cameras.main.fadeOut(600, 0, 0, 0);
+        scene.cameras.main.once('camerafadeoutcomplete', function () { scene.scene.start('menu'); });
+    };
+    this.input.keyboard.on('keydown', alMenu);
+    this.input.on('pointerdown', alMenu);
+    this.time.delayedCall(6500, alMenu);
+
+    this.cameras.main.fadeIn(800, 0, 0, 0);
+}
+
+function crearMenu ()
+{
+    var scene = this;
+    prepararRecursos(this);
+    Sonido.lluvia(0);
+    fondoSelva(this);
+    luciernagas(this);
+
+    // Tilcayo (gato) y Tilcayo guerrero
+    this.add.sprite(170, yGato(0.6), 'ticayo-idle').setScale(0.6).play('idle');
+    this.add.sprite(640, SUELO_Y + 2 - (236 - 128) * 0.5, 'ticayo-power').setScale(0.5).setFlipX(true).play('guerrero-idle');
+
+    agregarCapa(this, 'follaje-frente', 1.3);
+    this.add.image(0, 0, 'vineta').setOrigin(0);
+
+    // Título
+    var titulo = this.add.text(ANCHO / 2, 120, 'TILCAYO', {
+        fontFamily: 'Georgia, serif', fontSize: '96px', fontStyle: 'bold',
+        color: '#ffd166', stroke: '#2b1400', strokeThickness: 12
+    }).setOrigin(0.5).setShadow(4, 6, '#000000', 8, true, true);
+    this.tweens.add({ targets: titulo, y: 130, duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.add.text(ANCHO / 2, 200, 'El rescate en la selva', {
+        fontSize: '26px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 6
+    }).setOrigin(0.5);
+
+    // Botón JUGAR
+    var boton = this.add.image(ANCHO / 2, 320, 'boton-jugar').setScale(0.5).setInteractive({ useHandCursor: true });
+    var pulso = this.tweens.add({ targets: boton, scale: 0.53, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    boton.on('pointerover', function () { pulso.pause(); boton.setScale(0.57); });
+    boton.on('pointerout', function () { boton.setScale(0.5); pulso.resume(); });
+
+    this.add.text(ANCHO / 2, 395, 'Clic o ENTER para jugar', {
+        fontSize: '18px', fontStyle: 'bold', color: '#ffe8a3', stroke: '#000000', strokeThickness: 5
+    }).setOrigin(0.5);
+    this.add.text(ANCHO / 2, 570, '← → caminar    ↑ / ESPACIO saltar    X atacar (con poder)', {
+        fontSize: '16px', fontStyle: 'bold', color: '#ffffff', stroke: '#000000', strokeThickness: 4
+    }).setOrigin(0.5);
+
+    var yendo = false;
+    var jugar = function () {
+        if (yendo)
+        {
+            return;
+        }
+        yendo = true;
+        scene.cameras.main.fadeOut(500, 0, 0, 0);
+        scene.cameras.main.once('camerafadeoutcomplete', function () { scene.scene.start('historia'); });
+    };
+    boton.on('pointerdown', jugar);
+    this.input.keyboard.on('keydown-ENTER', jugar);
+    this.input.keyboard.on('keydown-SPACE', jugar);
+
+    this.cameras.main.fadeIn(600, 0, 0, 0);
+}
+
+// ---- Historia: una animación corta que termina y pasa directo al juego ----
+function crearHistoria ()
+{
+    var scene = this;
+    var fondo = fondoSelva(this);
+    luciernagas(this);
+
+    // La familia y Tilcayo
+    var ticayo = this.add.sprite(110, yGato(0.55), 'ticayo-idle').setScale(0.55).play('idle');
+    var mama = this.add.sprite(215, yGato(0.4), 'ticayo-idle').setScale(0.4).setFlipX(true).play('idle');
+    var cria = this.add.sprite(262, yGato(0.26), 'ticayo-idle').setScale(0.26).setFlipX(true).play({ key: 'idle', startFrame: 9 });
+    var jefeHistoria = this.add.sprite(920, SUELO_Y + 2, 'jefe-camina', 0);
+    poseJefe(jefeHistoria, 'camina', -1);
+    var jaulaHistoria = this.add.image(238, -120, 'jaula').setOrigin(0.5, 1);
+
+    var lluviaHistoria = this.add.particles(0, 0, 'gota', {
+        x: { min: -100, max: ANCHO + 200 }, y: -20, lifespan: 900,
+        speedY: { min: 750, max: 950 }, speedX: { min: -330, max: -260 }, rotate: 19,
+        alpha: { min: 0.35, max: 0.8 }, frequency: 6, emitting: false
+    });
+    relampago = this.add.graphics();
+    this.add.image(0, 0, 'vineta').setOrigin(0);
+
+    // Recuadro de narración (arriba, para no tapar a los personajes)
+    this.add.rectangle(ANCHO / 2, 70, ANCHO - 60, 100, 0x000000, 0.55).setStrokeStyle(2, 0xffd166, 0.6);
+    var texto = this.add.text(ANCHO / 2, 70, '', {
+        fontSize: '22px', fontStyle: 'bold', color: '#ffffff', align: 'center',
+        wordWrap: { width: ANCHO - 110 }, stroke: '#000000', strokeThickness: 4
+    }).setOrigin(0.5);
+    var escribiendo = null;
+    var narrar = function (frase) {
+        if (escribiendo) escribiendo.remove();
+        var n = 0;
+        texto.setText('');
+        escribiendo = scene.time.addEvent({
+            delay: 28, repeat: frase.length - 1,
+            callback: function () { n++; texto.setText(frase.substring(0, n)); }
+        });
+    };
+    this.add.text(ANCHO - 16, ALTO - 14, 'ESPACIO para saltar la historia', {
+        fontSize: '14px', fontStyle: 'bold', color: '#ffe8a3', stroke: '#000000', strokeThickness: 4
+    }).setOrigin(1, 1);
+
+    var yendo = false;
+    var alJuego = function () {
+        if (yendo)
+        {
+            return;
+        }
+        yendo = true;
+        vidas = 3;
+        scene.cameras.main.fadeOut(500, 0, 0, 0);
+        scene.cameras.main.once('camerafadeoutcomplete', function () { scene.scene.start('juego'); });
+    };
+    this.input.keyboard.on('keydown-SPACE', alJuego);
+    this.input.keyboard.on('keydown-ENTER', alJuego);
+    this.input.on('pointerdown', alJuego);
+
+    var en = function (ms, fn) { scene.time.delayedCall(ms, fn); };
+    this.cameras.main.fadeIn(600, 0, 0, 0);
+
+    // 1. La familia feliz
+    narrar('En lo profundo de la selva vivía Tilcayo, un pequeño ocelote, junto a su familia.');
+    en(900, function () {
+        scene.add.particles(200, yGato(0.4) - 40, 'corazon', {
+            speedY: { min: -60, max: -30 }, speedX: { min: -25, max: 25 }, lifespan: 1600,
+            scale: { start: 0.8, end: 0.3 }, alpha: { start: 1, end: 0 }, frequency: 350, duration: 2500
+        });
+    });
+
+    // 2. Se pone frío y llega el cazador
+    en(4500, function () {
+        narrar('Pero una tarde el cielo se puso frío y oscuro... y llegó el cazador.');
+        scene.tweens.add({ targets: fondo.frio, alpha: 0.9, duration: 1500 });
+        scene.tweens.add({ targets: fondo.nubes, alpha: 1, duration: 1500 });
+        scene.tweens.add({ targets: fondo.sol, alpha: 0, duration: 1500 });
+        lluviaHistoria.emitting = true;
+        Sonido.lluvia(1);
+        scene.tweens.add({
+            targets: jefeHistoria, x: 480, duration: 3000,
+            onComplete: function () {
+                poseJefe(jefeHistoria, 'risa', -1);
+                var ja = scene.add.text(480, SUELO_Y - 150, '¡JA JA JA!', {
+                    fontSize: '24px', fontStyle: 'bold', color: '#ffe066', stroke: '#000000', strokeThickness: 5
+                }).setOrigin(0.5);
+                scene.tweens.add({ targets: ja, y: ja.y - 30, alpha: 0, delay: 900, duration: 700 });
+            }
+        });
+    });
+
+    // 3. La jaula cae sobre la familia
+    en(9300, function () {
+        narrar('¡Atrapó a su familia en una jaula!');
+        dibujarRelampago(scene);
+        scene.cameras.main.flash(200, 255, 150, 130);
+        scene.tweens.add({
+            targets: jaulaHistoria, y: SUELO_Y + 3, duration: 600, ease: 'Bounce.easeOut',
+            onComplete: function () { scene.cameras.main.shake(300, 0.01); }
+        });
+        // Tilcayo salta del susto
+        scene.tweens.add({ targets: ticayo, y: ticayo.y - 30, duration: 200, yoyo: true, delay: 500 });
+    });
+
+    // 4. Se los lleva al templo; Tilcayo corre detrás
+    en(12300, function () {
+        narrar('...y se los llevó a su templo, al final de la selva.');
+        poseJefe(jefeHistoria, 'camina', 1);
+        scene.tweens.add({ targets: jefeHistoria, x: 1300, duration: 3400, ease: 'Sine.easeIn' });
+        scene.tweens.add({ targets: [jaulaHistoria, mama, cria], x: '+=1000', delay: 250, duration: 3400, ease: 'Sine.easeIn' });
+        en(700, function () {
+            ticayo.play('camina');
+            scene.tweens.add({
+                targets: ticayo, x: 470, duration: 2400,
+                onComplete: function () { ticayo.play('idle'); }
+            });
+        });
+    });
+
+    // 5. Tilcayo decide ir a rescatarlos
+    en(16800, function () {
+        narrar('Tilcayo no lo dudó: cruzaría toda la selva para rescatarlos.');
+        dibujarRelampago(scene);
+        scene.cameras.main.flash(150, 200, 220, 255);
+    });
+    en(20800, function () {
+        var grito = scene.add.text(ANCHO / 2, ALTO / 2 - 20, '¡A RESCATARLOS!', {
+            fontFamily: 'Georgia, serif', fontSize: '60px', fontStyle: 'bold',
+            color: '#ffd166', stroke: '#2b1400', strokeThickness: 10
+        }).setOrigin(0.5).setScale(0.2);
+        scene.tweens.add({ targets: grito, scale: 1, duration: 450, ease: 'Back.easeOut' });
+    });
+    en(22600, alJuego);
+}
+
+// =====================================================
+//  TORMENTA
+// =====================================================
+
+function actualizarTormenta (scene, time)
+{
+    // Cuánta tormenta corresponde según qué tan cerca está del jefe.
+    // Cuando el jefe cae, vuelve a salir el sol.
+    var objetivo = Phaser.Math.Clamp((jugador.x - TORMENTA.desde) / (TORMENTA.hasta - TORMENTA.desde), 0, 1);
+    if (jefe && jefe.estado === 'muerto')
+    {
+        objetivo = 0;
+    }
+    // Cerca del jefe la tormenta fría se vuelve roja
+    var objetivoRojo = Phaser.Math.Clamp((jugador.x - ROJO_DESDE) / (ARENA.inicio - ROJO_DESDE), 0, 1);
+    if (jefe && jefe.peleando)
+    {
+        objetivoRojo = 1;
+    }
+    if (objetivo === 0)
+    {
+        objetivoRojo = 0;
+    }
+    // Cambia de a poco (así no salta de golpe al reaparecer en el inicio)
+    var paso = Math.min(1, scene.game.loop.delta / 700);
+    intensidad += (objetivo - intensidad) * paso;
+    rojo += (objetivoRojo - rojo) * paso;
+    var t = intensidad;
+    var r = rojo;
+    var a = alegre.v;
+
+    // Frío: un poco desde el principio, mucho en la tormenta; se va con el cielo rojo y con el día alegre
+    fondoTormenta.setAlpha((FRIO_BASE + (0.9 - FRIO_BASE) * t) * (1 - r) * (1 - a));
+    fondoRojo.setAlpha(t * r * 0.9);
+    nubes.setAlpha(t);
+    nubes.setTint(Phaser.Display.Color.GetColor(255, Math.round(255 - 150 * r), Math.round(255 - 170 * r)));
+    tonoFrio.setAlpha((0.06 + t * 0.2) * (1 - r) * (1 - a));
+    tonoRojo.setAlpha(t * r * 0.2);
+    // Los rayos de sol se apagan con la tormenta y brillan fuerte en el día alegre
+    rayos.setAlpha(Math.max((0.75 + 0.25 * Math.sin(time / 1000)) * (1 - t), a));
+    arcoiris.setAlpha(a * 0.75);
+    luzAlegre.setAlpha(a * 0.2);
+    brilloAlegre.setAlpha(a * 0.08);
+
+    Sonido.lluvia(t > 0.08 ? t : 0);
+
+    // Lluvia: empieza con unas gotas y termina en aguacero
+    if (t > 0.08)
+    {
+        lluvia.emitting = true;
+        lluvia.frequency = Phaser.Math.Linear(50, 2, t);
+    }
+    else
+    {
+        lluvia.emitting = false;
+    }
+
+    // Relámpagos cuando la tormenta ya es fuerte (más seguidos cuanto más cerca)
+    if (t > 0.5 && time > proximoRelampago)
+    {
+        if (proximoRelampago > 0)
+        {
+            dibujarRelampago(scene);
+            if (rojo > 0.5)
+            {
+                scene.cameras.main.flash(160, 255, 150, 130);   // relámpago rojo
+            }
+            else
+            {
+                scene.cameras.main.flash(160, 200, 220, 255);
+            }
+            scene.time.delayedCall(260, function () {
+                scene.cameras.main.shake(400, 0.005);   // trueno
+            });
+        }
+        proximoRelampago = time + Phaser.Math.Between(1500, 4500) / t;
+    }
+}
+
+// Un rayo en zigzag que baja del cielo y se apaga
+function dibujarRelampago (scene)
+{
+    var x = Phaser.Math.Between(80, ANCHO - 80);
+    var y = 0;
+    var puntos = [[x, y]];
+    while (y < 300)
+    {
+        x += Phaser.Math.Between(-35, 35);
+        y += Phaser.Math.Between(20, 45);
+        puntos.push([x, y]);
+    }
+    relampago.clear();
+    [[10, 0x8fb4ff, 0.35], [4, 0xdde8ff, 0.8], [2, 0xffffff, 1]].forEach(function (capa) {
+        relampago.lineStyle(capa[0], capa[1], capa[2]);
+        relampago.beginPath();
+        relampago.moveTo(puntos[0][0], puntos[0][1]);
+        puntos.forEach(function (pt) { relampago.lineTo(pt[0], pt[1]); });
+        relampago.strokePath();
+    });
+    relampago.setAlpha(1);
+    scene.tweens.add({ targets: relampago, alpha: 0, delay: 80, duration: 250 });
+    Sonido.trueno();
+}
+
+// =====================================================
+//  COMIDA QUE CAE DEL CIELO
+// =====================================================
+
+function actualizarComida (scene, time)
+{
+    if (proximaComida === 0)
+    {
+        proximaComida = time + 8000;
+        return;
+    }
+    if (time < proximaComida)
+    {
+        return;
+    }
+    proximaComida = time + Phaser.Math.Between(12000, 20000);
+
+    // Busca un lugar a la vista que tenga suelo debajo (no agua, no la pirámide)
+    var cam = scene.cameras.main;
+    for (var intento = 0; intento < 10; intento++)
+    {
+        var x = cam.scrollX + Phaser.Math.Between(120, ANCHO - 120);
+        var libre = ARENA_CAJAS.every(function (c) { return Math.abs(x - c) > 50; }) &&
+            carnes.getChildren().every(function (c) { return Math.abs(x - c.x) > 70; });
+        if (x < PIRAMIDE.x1 - 20 && libre && haySuelo(x))
+        {
+            soltarComida(scene, x);
+            return;
+        }
+    }
+}
+
+function haySuelo (x)
+{
+    return TRAMOS_SUELO.some(function (t) { return x > t[0] + 30 && x < t[1] - 30; });
+}
+
+function soltarComida (scene, x)
+{
+    var carne = crearCarne(scene, Phaser.Math.RND.pick(['carne', 'filete']), x, SUELO_Y - 30, true);
+
+    // Si nadie se la come, parpadea y desaparece
+    scene.time.delayedCall(14000, function () {
+        if (!carne.active)
+        {
+            return;
+        }
+        scene.tweens.add({
+            targets: carne, alpha: 0, duration: 150, yoyo: true, repeat: 5,
+            onComplete: function () {
+                if (carne.active)
+                {
+                    carne.brillo.destroy();
+                    carne.destroy();
+                }
+            }
+        });
+    });
+}
+
+// =====================================================
+//  JEFE FINAL
+// =====================================================
+
+// caida = true: baja desde arriba de la pantalla y rebota antes de flotar
+function crearCarne (scene, tipo, x, y, caida)
+{
+    var brillo = scene.add.image(x, y, 'luz').setScale(4).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.6);
+    var carne = carnes.create(x, y, tipo);   // el cuerpo queda fijo en (x, y)
+    carne.brillo = brillo;
+
+    var flotar = function () {
+        scene.tweens.add({ targets: [carne, brillo], y: y - 8, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        scene.tweens.add({ targets: brillo, alpha: 0.25, scale: 3, duration: 700, yoyo: true, repeat: -1 });
+    };
+
+    if (caida)
+    {
+        carne.y = brillo.y = y - 520;
+        scene.tweens.add({ targets: [carne, brillo], y: y, duration: 1000, ease: 'Bounce.easeOut', onComplete: flotar });
+    }
+    else
+    {
+        flotar();
+    }
+    return carne;
+}
+
+function crearJefe (scene)
+{
+    jefe = {
+        sprite: scene.add.sprite(JEFE.x, SUELO_Y + 2, 'jefe-camina', 0),
+        x: JEFE.x,
+        dir: -1,
+        estado: 'ronda',   // ronda, risa, persigue, carga, ataque, pausa, muerto
+        hasta: 0,          // cuándo termina el estado actual
+        vida: JEFE.vida,
+        peleando: false,
+        invulnerableHasta: 0,
+        ultimoGolpe: -1,
+        proximaBala: 0,
+        velocidadBala: null,
+        acerto: false,     // si le pegó al Tilcayo en este ataque (para reírse)
+        soltoCarne: false,
+        pisotonHasta: 0,
+        jaula: [],         // barrotes que bajan al empezar la pelea
+        colisores: []
+    };
+    animarJefe('camina');
+}
+
+// Cambia de hoja (cada una tiene su escala) y acomoda el eje del cuerpo
+function animarJefe (hoja, reiniciar)
+{
+    jefe.sprite.setScale(HOJAS_JEFE[hoja].escala);
+    jefe.sprite.anims.play('jefe-' + hoja, !reiniciar);
+    mirarJefe(jefe.dir);
+}
+
+function hojaJefe ()
+{
+    return HOJAS_JEFE[jefe.sprite.anims.currentAnim.key.replace('jefe-', '')];
+}
+
+// En las hojas mira a la izquierda: para mirar a la derecha se voltea sobre el ancla
+function mirarJefe (dir)
+{
+    var h = hojaJefe();
+    jefe.dir = dir;
+    jefe.sprite.setFlipX(dir > 0);
+    var ancla = dir > 0 ? h.anchoCuadro - h.ancla : h.ancla;
+    jefe.sprite.setOrigin(ancla / h.anchoCuadro, h.pies / h.alto);
+}
+
+function cajaJefe ()
+{
+    return new Phaser.Geom.Rectangle(jefe.x - JEFE.ancho / 2, SUELO_Y - JEFE.alto, JEFE.ancho, JEFE.alto);
+}
+
+function moverJefe (dx)
+{
+    // (no se mete en las cajas de las esquinas)
+    jefe.x = Phaser.Math.Clamp(jefe.x + dx, ARENA.inicio + 115, ARENA.fin - 115);
+}
+
+function actualizarJefe (scene, time)
+{
+    if (!jefe || jefe.estado === 'muerto')
+    {
+        return;
+    }
+
+    var dt = scene.game.loop.delta / 1000;
+    var distancia = jugador.x - jefe.x;
+    var furioso = jefe.vida <= JEFE.vida / 2;
+
+    switch (jefe.estado)
+    {
+        case 'ronda':
+            // Camina de un lado a otro hasta que ve al Tilcayo dentro de la arena
+            moverJefe(jefe.dir * JEFE.velocidadRonda * dt);
+            if (jefe.x <= JEFE.rondaMin) mirarJefe(1);
+            else if (jefe.x >= JEFE.rondaMax) mirarJefe(-1);
+            if (Math.abs(distancia) < JEFE.alcance && jugador.x > ARENA.inicio + 80)
+            {
+                empezarPelea(scene, time);
+            }
+            break;
+
+        case 'risa':
+        case 'pausa':
+            if (time >= jefe.hasta) cambiarEstado('persigue', time);
+            break;
+
+        case 'persigue':
+            mirarJefe(distancia < 0 ? -1 : 1);
+            if (Math.abs(distancia) > JEFE.distanciaAtaque && time < jefe.hasta)
+            {
+                moverJefe(jefe.dir * JEFE.velocidadPelea * (furioso ? 1.5 : 1) * dt);
+            }
+            else
+            {
+                cambiarEstado('carga', time);
+            }
+            break;
+
+        case 'carga':
+            if (time >= jefe.hasta) cambiarEstado('ataque', time);
+            break;
+
+        case 'ataque':
+            if (time >= jefe.proximaBala)
+            {
+                jefe.proximaBala = time + (furioso ? 130 : 200);
+                dispararJefe(scene);
+            }
+            if (time >= jefe.hasta) cambiarEstado(jefe.acerto ? 'risa' : 'pausa', time);
+            break;
+    }
+
+    jefe.sprite.x = jefe.x;
+    tocarJefe(scene, time);
+}
+
+function cambiarEstado (estado, time)
+{
+    var furioso = jefe.vida <= JEFE.vida / 2;
+    jefe.estado = estado;
+
+    if (estado === 'persigue')
+    {
+        animarJefe('camina');
+        jefe.hasta = time + 1600;
+    }
+    else if (estado === 'carga')
+    {
+        // Prepara el arma: es el aviso para que el Tilcayo se cubra
+        mirarJefe(jugador.x < jefe.x ? -1 : 1);
+        animarJefe('carga', true);
+        jefe.hasta = time + (furioso ? 750 : 1100);
+    }
+    else if (estado === 'ataque')
+    {
+        animarJefe('ataque', true);
+        jefe.hasta = time + 1000;
+        jefe.proximaBala = time;
+        jefe.acerto = false;
+        jefe.velocidadBala = apuntarJefe();
+    }
+    else if (estado === 'risa')
+    {
+        animarJefe('risa', true);
+        jefe.hasta = time + 1800;
+        burbuja(jefe.sprite.scene, '¡JA JA JA!');
+    }
+    else if (estado === 'pausa')
+    {
+        animarJefe('carga', true);
+        jefe.sprite.anims.stop();
+        jefe.sprite.setFrame(0);
+        jefe.hasta = time + (furioso ? 400 : 800);
+    }
+}
+
+function bocaJefe ()
+{
+    return { x: jefe.x - JEFE.boca[0] * jefe.dir, y: SUELO_Y + JEFE.boca[1] };
+}
+
+// Apunta al Tilcayo al empezar la ráfaga (con poca inclinación): moviéndose o saltando se esquiva
+function apuntarJefe ()
+{
+    var boca = bocaJefe();
+    var c = jugador.body.center;
+    var dx = Math.max(Math.abs(c.x - boca.x), 40);
+    var pendiente = Phaser.Math.Clamp((c.y - boca.y) / dx, -0.35, 0.35);
+    return new Phaser.Math.Vector2(jefe.dir, pendiente).normalize().scale(JEFE.velocidadBala);
+}
+
+function dispararJefe (scene)
+{
+    var boca = bocaJefe();
+    var bala = balas.create(boca.x, boca.y, 'bala');
+    bala.delJefe = true;
+    Sonido.disparo(0.22);
+    bala.setScale(1.5).setTint(0xffd27a);
+    bala.body.setSize(14, 6);
+    bala.setVelocity(jefe.velocidadBala.x, jefe.velocidadBala.y);
+    bala.setRotation(Math.atan2(jefe.velocidadBala.y, jefe.velocidadBala.x));
+}
+
+// Choque con el cuerpo del jefe: si cae encima le pega (pisotón), si no, se lastima
+function tocarJefe (scene, time)
+{
+    if (muriendo)
+    {
+        return;
+    }
+
+    var b = jugador.body;
+    var zona = cajaJefe();
+    if (!Phaser.Geom.Intersects.RectangleToRectangle(new Phaser.Geom.Rectangle(b.x, b.y, b.width, b.height), zona))
+    {
+        return;
+    }
+
+    // Si le cae o le salta encima (pies en la mitad de arriba del jefe),
+    // el que pierde vida es solo el jefe
+    var enSuelo = b.blocked.down || b.touching.down;
+    if (!enSuelo && b.bottom < zona.y + zona.height * 0.5)
+    {
+        jugador.setVelocityY(-520);
+        jefe.pisotonHasta = time + 600;   // mientras rebota no se lastima
+        Sonido.pisoton();
+        danarJefe(scene, time);
+        // Se tambalea hacia atrás, así el Tilcayo cae al suelo y no rebota sin parar
+        if (jefe.estado !== 'muerto')
+        {
+            var atras = jugador.x < jefe.x ? 1 : -1;
+            var destino = Phaser.Math.Clamp(jefe.x + atras * 120, ARENA.inicio + 115, ARENA.fin - 115);
+            if (Math.abs(destino - jefe.x) < 60)
+            {
+                destino = Phaser.Math.Clamp(jefe.x - atras * 120, ARENA.inicio + 115, ARENA.fin - 115);   // contra la pared: al otro lado
+            }
+            scene.tweens.add({ targets: jefe, x: destino, duration: 220, ease: 'Quad.easeOut' });
+        }
+        return;
+    }
+
+    if (!invulnerable && time > jefe.pisotonHasta)
+    {
+        jefe.acerto = true;
+        herir(scene, jefe.x);
+    }
+}
+
+// Un espadazo le pega una sola vez
+function golpearJefeConEspada (scene, time)
+{
+    if (!jefe || jefe.estado === 'muerto' || jefe.ultimoGolpe === numeroAtaque)
+    {
+        return;
+    }
+    if (Phaser.Geom.Intersects.RectangleToRectangle(zonaEspada(), cajaJefe()))
+    {
+        jefe.ultimoGolpe = numeroAtaque;
+        danarJefe(scene, time);
+    }
+}
+
+function danarJefe (scene, time)
+{
+    if (time < jefe.invulnerableHasta)
+    {
+        return;
+    }
+    jefe.invulnerableHasta = time + 300;
+
+    if (!jefe.peleando)
+    {
+        empezarPelea(scene, time);
+    }
+
+    jefe.vida--;
+    Sonido.golpe();
+    dibujarBarraJefe();
+    chispas.explode(14, jefe.x, SUELO_Y - JEFE.alto / 2);
+    scene.cameras.main.shake(120, 0.006);
+
+    if (jefe.vida <= 0)
+    {
+        derrotarJefe(scene);
+        return;
+    }
+
+    jefe.sprite.setTintFill(0xffffff);
+    scene.time.delayedCall(90, function () {
+        if (jefe && jefe.estado !== 'muerto') jefe.sprite.clearTint();
+    });
+
+    // A media vida se enfurece (más rápido) y suelta una carne de poder
+    if (!jefe.soltoCarne && jefe.vida <= JEFE.vida / 2)
+    {
+        jefe.soltoCarne = true;
+        mostrarAviso(scene, '¡EL JEFE SE ENFURECE!', '#ff6b4a');
+        var cx = jefe.x < (ARENA.inicio + ARENA.fin) / 2 ? ARENA.fin - 140 : ARENA.inicio + 140;
+        chispas.explode(20, cx, SUELO_Y - 30);
+        crearCarne(scene, 'filete', cx, SUELO_Y - 30);
+    }
+}
+
+function empezarPelea (scene, time)
+{
+    jefe.peleando = true;
+    puntoInicio = { x: ARENA.inicio + 80, y: SUELO_Y - 60 };
+
+    // Se cierra la arena por la izquierda
+    muroIzq = caja(scene, ARENA.inicio, 0, GROSOR_BARROTES, SUELO_Y);
+    jefe.colisores.push(scene.physics.add.collider(jugador, muroIzq));
+    armarJaulaArena(scene);
+
+    // La cámara se desliza a la arena y se queda ahí
+    var cam = scene.cameras.main;
+    cam.stopFollow();
+    cam.pan((ARENA.inicio + ARENA.fin) / 2, ALTO / 2, 600, 'Sine.easeInOut', false, function (c, avance) {
+        if (avance === 1 && jefe.peleando)   // (si ya lo vencieron, no se encierra)
+        {
+            c.setBounds(ARENA.inicio, 0, ARENA.fin - ARENA.inicio, ALTO);
+            c.startFollow(jugador, true, 0.12, 0.12);
+        }
+    });
+
+    textoJefe.setText('JEFE');
+    dibujarBarraJefe();
+    mostrarAviso(scene, '¡JEFE FINAL!', '#ff6b4a');
+    mirarJefe(jugador.x < jefe.x ? -1 : 1);
+    cambiarEstado('risa', time);
+}
+
+function derrotarJefe (scene)
+{
+    var j = jefe;
+    j.estado = 'muerto';
+    j.peleando = false;
+    barraJefe.clear();
+    textoJefe.setText('');
+    balas.clear(true, true);
+
+    // Animación de muerte: se tambalea y cae; queda tirado un momento y se desvanece
+    j.sprite.setAngle(0);
+    animarJefe('muerte', true);
+    j.sprite.setTintFill(0xffffff);
+    scene.time.delayedCall(120, function () { j.sprite.clearTint(); });
+    Sonido.explosion();
+    Sonido.fanfarria();
+    scene.cameras.main.flash(300, 255, 230, 180);
+    scene.cameras.main.shake(500, 0.012);
+    for (var i = 0; i < 6; i++)
+    {
+        scene.time.delayedCall(i * 140, function () {
+            chispas.explode(25, j.x + Phaser.Math.Between(-40, 40), SUELO_Y - Phaser.Math.Between(20, 120));
+        });
+    }
+    scene.tweens.add({
+        targets: j.sprite, alpha: 0, delay: 2600, duration: 900,
+        onComplete: function () { j.sprite.destroy(); }
+    });
+
+    // Se abre el camino a la pirámide: la jaula sube y se va
+    scene.tweens.add({ targets: j.jaula, y: '-=' + (SUELO_Y + 40), delay: 800, duration: 1200, ease: 'Quad.easeIn' });
+    j.colisores.forEach(function (c) { c.destroy(); });
+    muroDer.destroy();
+    if (muroIzq) muroIzq.destroy();
+    // La cámara se queda en la arena mientras el jefe cae, y después se suelta
+    scene.time.delayedCall(2500, function () {
+        var cam = scene.cameras.main;
+        cam.setBounds(0, 0, ANCHO_NIVEL, ALTO);
+        cam.startFollow(jugador, true, 0.12, 0.12);
+    });
+
+    mostrarAviso(scene, '¡JEFE DERROTADO!', '#7ee081');
+    scene.time.delayedCall(2000, function () {
+        if (!ganado) mostrarAviso(scene, '¡Sube a la pirámide\ny rescata a tu familia!', '#ffd166');
+    });
+}
+
+function dibujarBarraJefe ()
+{
+    var ancho = 300;
+    var x = ANCHO / 2 - ancho / 2;
+    var y = 22;
+    barraJefe.clear();
+    if (!jefe || !jefe.peleando)
+    {
+        return;
+    }
+    barraJefe.fillStyle(0x000000, 0.6);
+    barraJefe.fillRoundedRect(x - 3, y - 3, ancho + 6, 18, 6);
+    barraJefe.fillStyle(jefe.vida <= JEFE.vida / 2 ? 0xff5a36 : 0xd62828, 1);
+    barraJefe.fillRoundedRect(x, y, ancho * Math.max(jefe.vida, 0) / JEFE.vida, 12, 4);
+}
+
+// Al empezar la pelea cae una jaula alrededor de la arena, y aparecen
+// plataformas y cajas para saltar (y caerle encima al jefe)
+function armarJaulaArena (scene)
+{
+    var ancho = ARENA.fin - ARENA.inicio;
+    var barrotes = [
+        scene.add.tileSprite(ARENA.inicio, 0, GROSOR_BARROTES, SUELO_Y + 4, 'barrotes').setOrigin(0),
+        scene.add.tileSprite(ARENA.fin - GROSOR_BARROTES, 0, GROSOR_BARROTES, SUELO_Y + 4, 'barrotes').setOrigin(0),
+        scene.add.tileSprite(ARENA.inicio, 0, ancho, 26, 'barrotes-techo').setOrigin(0)
+    ];
+    // Bajan de golpe
+    barrotes.forEach(function (b) { b.y = -SUELO_Y - 10; });
+    scene.tweens.add({
+        targets: barrotes, y: 0, duration: 650, ease: 'Bounce.easeOut',
+        onComplete: function () { scene.cameras.main.shake(250, 0.008); }
+    });
+    jefe.jaula = barrotes;
+
+    // Plataformas de piedra: solo chocan por arriba (se atraviesan saltando desde abajo)
+    ARENA_PLATAFORMAS.forEach(function (pl, i) {
+        var losa = scene.add.image(pl[0], pl[1] - 4, 'losa').setOrigin(0.5, 0).setScale(0, 1);
+        scene.tweens.add({ targets: losa, scaleX: 1, delay: 500 + i * 150, duration: 300, ease: 'Back.easeOut' });
+        var z = caja(scene, pl[0] - 70, pl[1], 140, 16);
+        z.body.checkCollision.down = false;
+        z.body.checkCollision.left = false;
+        z.body.checkCollision.right = false;
+        scene.physics.add.collider(jugador, z);
+    });
+
+    // Cajas de madera en las esquinas: caen del cielo; paran las balas
+    ARENA_CAJAS.forEach(function (cx, i) {
+        var dibujo = scene.add.image(cx, SUELO_Y + 2 - 520, 'caja-madera').setOrigin(0.5, 1);
+        scene.tweens.add({ targets: dibujo, y: SUELO_Y + 2, delay: 700 + i * 200, duration: 600, ease: 'Bounce.easeOut' });
+        var z = caja(scene, cx - 24, SUELO_Y - 48, 48, 48);
+        scene.physics.add.collider(jugador, z);
+        scene.physics.add.collider(balas, z, romperBala);
+    });
+
+    mostrarAviso(scene, '¡CLANG!', '#cfd8e3');
+}
+
+// Texto que sale de la cabeza del jefe
+function burbuja (scene, texto)
+{
+    var t = scene.add.text(jefe.x, SUELO_Y - JEFE.alto - 20, texto, {
+        fontSize: '22px', fontStyle: 'bold', color: '#ffe066', stroke: '#000000', strokeThickness: 5
+    }).setOrigin(0.5);
+    scene.tweens.add({ targets: t, y: t.y - 30, alpha: 0, delay: 900, duration: 700, onComplete: function () { t.destroy(); } });
+}
+
+// =====================================================
+//  JAULA Y FINAL
+// =====================================================
+
+function crearJaula (scene)
+{
+    var x = CENTRO_PIRAMIDE;
+    var y = CIMA_Y;   // piso de la jaula (la cima de la pirámide)
+
+    // Brillo para que se vea desde lejos
+    var brillo = scene.add.image(x, y - 50, 'luz').setScale(9).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.25);
+    scene.tweens.add({ targets: brillo, alpha: 0.45, duration: 1200, yoyo: true, repeat: -1 });
+
+    // La familia: mamá y cachorro (el mismo sprite del Tilcayo, más chiquito)
+    // Los pies del gato están 50 px debajo del centro del cuadro de 256
+    var mama = scene.add.sprite(x + 18, y - 50 * 0.34 - 4, 'ticayo-idle').setScale(0.34).setFlipX(true);
+    var cria = scene.add.sprite(x - 22, y - 50 * 0.22 - 4, 'ticayo-idle').setScale(0.22).setFlipX(true);
+    mama.anims.play('idle');
+    cria.anims.play({ key: 'idle', startFrame: 9 });
+
+    jaula = {
+        imagen: scene.add.image(x, y + 3, 'jaula').setOrigin(0.5, 1),
+        mama: mama,
+        cria: cria,
+        zona: caja(scene, x - 60, y - 60, 120, 60)
+    };
+}
+
+function rescatarFamilia ()
+{
+    if (ganado || gameOver || muriendo || (jefe && jefe.estado !== 'muerto'))
+    {
+        return;
+    }
+    ganado = true;
+    gameOver = true;   // se acaba el control; R vuelve a empezar
+    jugador.setVelocityX(0);
+    if (poderHasta > 0)
+    {
+        quitarPoder(this);
+    }
+
+    var scene = this;
+    var x = jaula.imagen.x;
+
+    // Música feliz (se repite mientras dure el final)
+    Sonido.lluvia(0);
+    Sonido.melodiaFeliz();
+    scene.time.addEvent({ delay: 7000, loop: true, callback: function () { Sonido.melodiaFeliz(); } });
+    scene.cameras.main.flash(400, 255, 240, 200);
+    chispas.explode(40, x, CIMA_Y - 50);
+
+    // Se abre la jaula: los barrotes suben y desaparecen
+    scene.tweens.add({ targets: jaula.imagen, y: CIMA_Y - 140, alpha: 0, duration: 900, ease: 'Quad.easeIn' });
+
+    // La familia salta hacia el Tilcayo
+    var lado = jugador.x < x ? -1 : 1;
+    [[jaula.mama, 45, 0], [jaula.cria, 80, 250]].forEach(function (d) {
+        var gato = d[0];
+        gato.setFlipX(lado < 0);
+        var destino = Phaser.Math.Clamp(jugador.x - lado * d[1], x - 65, x + 65);
+        scene.tweens.add({ targets: gato, x: destino, delay: 500 + d[2], duration: 600 });
+        scene.tweens.add({ targets: gato, y: gato.y - 30, delay: 500 + d[2], duration: 300, yoyo: true, ease: 'Quad.easeOut' });
+    });
+
+    // Se hace un día alegre y brillante: sol fuerte, arcoíris y mariposas
+    scene.tweens.add({ targets: alegre, v: 1, duration: 2500, ease: 'Sine.easeInOut' });
+    scene.add.particles(0, 0, 'mariposa', {
+        x: { min: x - 380, max: x + 250 },
+        y: { min: 160, max: 480 },
+        lifespan: 7000,
+        speedX: { min: -40, max: 40 },
+        speedY: { min: -30, max: 15 },
+        scaleX: { start: 1, end: -1, ease: 'Sine.easeInOut' },   // aletea
+        alpha: { start: 1, end: 0 },
+        tint: [0xffd166, 0xff8fab, 0x8ecae6, 0xb8f28c, 0xffffff],
+        frequency: 220
+    });
+
+    // Corazones y hojas de festejo
+    scene.add.particles(x, CIMA_Y - 40, 'corazon', {
+        speedY: { min: -90, max: -40 }, speedX: { min: -40, max: 40 },
+        lifespan: 2200, scale: { start: 1, end: 0.4 }, alpha: { start: 1, end: 0 }, frequency: 180
+    });
+    scene.add.particles(0, -10, 'hoja', {
+        x: { min: 0, max: ANCHO }, lifespan: 5000, speedY: { min: 90, max: 160 }, speedX: { min: -40, max: 40 },
+        rotate: { start: 0, end: 540 }, scale: { min: 1, max: 1.8 }, frequency: 40,
+        tint: [0xffd166, 0xff6b4a, 0x7ee081, 0x6fa8ff]
+    }).setScrollFactor(0).setDepth(CAPA_CLIMA);
+
+    scene.time.delayedCall(1300, function () {
+        // Arriba de la pantalla, para no tapar a la familia en la cima
+        textoCentro.setText('¡FAMILIA RESCATADA!\nFIN').setY(110);
+        textoCentro.setScale(0.3);
+        scene.tweens.add({ targets: textoCentro, scale: 1, duration: 400, ease: 'Back.easeOut' });
+        scene.add.text(ANCHO / 2, 175, 'Presiona R para jugar de nuevo', {
+            fontSize: '20px', fontStyle: 'bold', color: '#ffd166', stroke: '#000000', strokeThickness: 5
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(CAPA_TEXTO);
+    });
+}
+
+// Después de ganar: el Tilcayo termina de caer y se queda quieto
+function actualizarFinal ()
+{
+    jugador.setVelocityX(0);
+    var enSuelo = jugador.body.blocked.down || jugador.body.touching.down;
+    if (forma === FORMAS.salto)
+    {
+        if (enSuelo) ponerForma(jugador, FORMAS.normal);
+        else jugador.setFrame(cuadroSalto(jugador.body.velocity.y));
+    }
+    else
+    {
+        jugador.anims.play(forma.anim, true);
+    }
+}
+
+// =====================================================
+//  DIBUJO DE TEXTURAS
+// =====================================================
+
+function lienzo (scene, clave, w, h, dibujar)
+{
+    var tex = scene.textures.createCanvas(clave, w, h);
+    dibujar(tex.getContext(), w, h);
+    tex.refresh();
+}
+
+function circulo (ctx, x, y, r)
+{
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function elipse (ctx, x, y, rx, ry, ang)
+{
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, ang || 0, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// Dibuja algo 3 veces (x, x-w, x+w) para que la capa se repita sin cortes
+function repetir (w, x, fn)
+{
+    fn(x - w);
+    fn(x);
+    fn(x + w);
+}
+
+// Copa de árbol: montón de círculos con 3 tonos (sombra, medio, luz)
+function copa (ctx, cx, cy, r, colores)
+{
+    var i;
+    ctx.fillStyle = colores[0];
+    for (i = 0; i < 16; i++) circulo(ctx, cx + rnd.realInRange(-r, r), cy + rnd.realInRange(-r * 0.35, r * 0.5), rnd.realInRange(r * 0.35, r * 0.6));
+    ctx.fillStyle = colores[1];
+    for (i = 0; i < 11; i++) circulo(ctx, cx + rnd.realInRange(-r * 0.85, r * 0.7), cy + rnd.realInRange(-r * 0.5, r * 0.2), rnd.realInRange(r * 0.25, r * 0.45));
+    ctx.fillStyle = colores[2];
+    for (i = 0; i < 7; i++) circulo(ctx, cx + rnd.realInRange(-r * 0.7, r * 0.3), cy + rnd.realInRange(-r * 0.6, -r * 0.1), rnd.realInRange(r * 0.12, r * 0.25));
+}
+
+// Tronco con sombreado, corteza y raíces tabulares (típicas de la selva)
+function tronco (ctx, x, yArriba, yBase, w, oscuro, claro)
+{
+    var grad = ctx.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+    grad.addColorStop(0, oscuro);
+    grad.addColorStop(0.65, claro);
+    grad.addColorStop(1, oscuro);
+    ctx.fillStyle = grad;
+
+    ctx.beginPath();
+    ctx.moveTo(x - w * 0.4, yArriba);
+    ctx.lineTo(x + w * 0.4, yArriba);
+    ctx.lineTo(x + w * 0.5, yBase);
+    ctx.lineTo(x - w * 0.5, yBase);
+    ctx.closePath();
+    ctx.fill();
+
+    // Raíces
+    [-1, 1].forEach(function (lado) {
+        for (var k = 0; k < 2; k++)
+        {
+            var alto = w * (k === 0 ? 1.1 : 0.6);
+            var largo = w * (k === 0 ? 1.1 : 1.6);
+            ctx.beginPath();
+            ctx.moveTo(x + lado * w * 0.2, yBase - alto);
+            ctx.quadraticCurveTo(x + lado * w * 0.45, yBase - alto * 0.2, x + lado * largo, yBase);
+            ctx.lineTo(x + lado * w * 0.1, yBase);
+            ctx.closePath();
+            ctx.fill();
+        }
+    });
+
+    // Líneas de corteza
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 2;
+    for (var k = 0; k < 6; k++)
+    {
+        var xx = x - w * 0.32 + k * w * 0.13;
+        ctx.beginPath();
+        ctx.moveTo(xx, yArriba);
+        for (var y = yArriba; y < yBase; y += 18) ctx.lineTo(xx + rnd.realInRange(-2.5, 2.5), y);
+        ctx.stroke();
+    }
+
+    // Musgo
+    ctx.fillStyle = 'rgba(90,150,60,0.35)';
+    for (var m = 0; m < 5; m++) elipse(ctx, x + rnd.realInRange(-w * 0.35, w * 0.2), rnd.realInRange(yArriba + 40, yBase - 20), rnd.realInRange(6, 14), rnd.realInRange(10, 25));
+}
+
+// Liana colgando con hojitas
+function liana (ctx, x, largo, curva, color, colorHoja)
+{
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, -10);
+    ctx.bezierCurveTo(x + curva, largo * 0.3, x - curva, largo * 0.7, x + curva * 0.3, largo);
+    ctx.stroke();
+
+    ctx.fillStyle = colorHoja;
+    for (var t = 0.1; t < 1; t += 0.09)
+    {
+        var px = bezier(x, x + curva, x - curva, x + curva * 0.3, t);
+        var py = bezier(-10, largo * 0.3, largo * 0.7, largo, t);
+        elipse(ctx, px + 5, py, 6, 3, 0.6);
+        elipse(ctx, px - 5, py + 4, 6, 3, -0.6);
+    }
+}
+
+function bezier (a, b, c, d, t)
+{
+    var u = 1 - t;
+    return u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d;
+}
+
+function crearTexturas (scene)
+{
+    // ---------- Cielo ----------
+    lienzo(scene, 'cielo', ANCHO, ALTO, function (ctx, w, h) {
+        var g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, '#5fa9c2');
+        g.addColorStop(0.45, '#b9e0cf');
+        g.addColorStop(0.75, '#f3e6b0');
+        g.addColorStop(1, '#f7d98e');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+
+        // Resplandor del sol
+        var sol = ctx.createRadialGradient(560, 170, 10, 560, 170, 260);
+        sol.addColorStop(0, 'rgba(255,250,220,1)');
+        sol.addColorStop(0.15, 'rgba(255,240,190,0.8)');
+        sol.addColorStop(1, 'rgba(255,240,190,0)');
+        ctx.fillStyle = sol;
+        ctx.fillRect(0, 0, w, h);
+    });
+
+    // ---------- Montañas lejanas con neblina ----------
+    lienzo(scene, 'montanas', 1024, ALTO, function (ctx, w, h) {
+        var cordillera = function (base, amp, color, fase) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, h);
+            for (var x = 0; x <= w; x += 8)
+            {
+                var a = (x / w) * Math.PI * 2;
+                ctx.lineTo(x, base - amp * (0.55 * Math.sin(a * 2 + fase) + 0.3 * Math.sin(a * 5 + fase * 2) + 0.15 * Math.sin(a * 11)));
+            }
+            ctx.lineTo(w, h);
+            ctx.closePath();
+            ctx.fill();
+        };
+        cordillera(300, 90, '#8dbfb2', 0.5);
+        cordillera(350, 60, '#74aa9a', 2.1);
+
+        var niebla = ctx.createLinearGradient(0, 260, 0, 420);
+        niebla.addColorStop(0, 'rgba(225,240,225,0)');
+        niebla.addColorStop(1, 'rgba(225,240,225,0.85)');
+        ctx.fillStyle = niebla;
+        ctx.fillRect(0, 260, w, h - 260);
+    });
+
+    // ---------- Selva lejana ----------
+    lienzo(scene, 'arboles-lejanos', 1024, ALTO, function (ctx, w, h) {
+        for (var x = 0; x < w; x += 55)
+        {
+            var px = x + rnd.between(-15, 15);
+            var alto = rnd.between(330, 390);
+            repetir(w, px, function (xx) {
+                ctx.fillStyle = '#4f7d69';
+                ctx.fillRect(xx - 4, alto, 8, h - alto);
+            });
+            var s = rnd.state();
+            repetir(w, px, function (xx) {
+                rnd.state(s);
+                copa(ctx, xx, alto, rnd.between(38, 55), ['#4c8a6f', '#5c9a7e', '#70ab8e']);
+            });
+        }
+        ctx.fillStyle = '#4c8a6f';
+        ctx.fillRect(0, 370, w, h - 370);
+
+        var niebla = ctx.createLinearGradient(0, 300, 0, h);
+        niebla.addColorStop(0, 'rgba(210,235,220,0.15)');
+        niebla.addColorStop(1, 'rgba(210,235,220,0.7)');
+        ctx.fillStyle = niebla;
+        ctx.fillRect(0, 300, w, h - 300);
+    });
+
+    // ---------- Árboles gigantes de fondo ----------
+    lienzo(scene, 'arboles-grandes', 1600, ALTO, function (ctx, w, h) {
+        var colHojas = ['#1d4f33', '#276b42', '#3a8a52'];
+        var posiciones = [120, 520, 900, 1330];
+
+        // Arbustos al pie de los árboles
+        for (var x = 0; x < w; x += 40)
+        {
+            var s = rnd.state();
+            repetir(w, x, function (xx) {
+                rnd.state(s);
+                copa(ctx, xx, h - 20, rnd.between(28, 40), ['#1f4a30', '#2a5f3c', '#357048']);
+            });
+        }
+
+        posiciones.forEach(function (px) {
+            var anchoT = rnd.between(70, 110);
+            var s = rnd.state();
+            repetir(w, px, function (xx) {
+                rnd.state(s);
+                tronco(ctx, xx, 0, h - 10, anchoT, '#2a1d14', '#5a3f2a');
+
+                // Ramas laterales con su copa
+                ctx.strokeStyle = '#3a2a1c';
+                ctx.lineCap = 'round';
+                [-1, 1].forEach(function (lado) {
+                    var yR = rnd.between(120, 220);
+                    ctx.lineWidth = anchoT * 0.22;
+                    ctx.beginPath();
+                    ctx.moveTo(xx, yR + 60);
+                    ctx.quadraticCurveTo(xx + lado * 60, yR + 20, xx + lado * 140, yR);
+                    ctx.stroke();
+                    copa(ctx, xx + lado * 150, yR - 10, 55, colHojas);
+                });
+
+                // Copa gigante arriba
+                copa(ctx, xx, 20, 150, colHojas);
+            });
+        });
+
+        // Lianas
+        for (var l = 0; l < 14; l++)
+        {
+            var lx = rnd.between(0, w);
+            var largo = rnd.between(150, 380);
+            var curva = rnd.between(-30, 30);
+            repetir(w, lx, function (xx) {
+                liana(ctx, xx, largo, curva, '#2c4a22', '#3f7a38');
+            });
+        }
+
+        // Neblina baja
+        var niebla = ctx.createLinearGradient(0, 380, 0, h);
+        niebla.addColorStop(0, 'rgba(200,230,210,0)');
+        niebla.addColorStop(1, 'rgba(200,230,210,0.35)');
+        ctx.fillStyle = niebla;
+        ctx.fillRect(0, 380, w, h - 380);
+    });
+
+    // ---------- Rayos de sol ----------
+    lienzo(scene, 'rayos', ANCHO, ALTO, function (ctx, w, h) {
+        var rayos = [[380, 60, 180], [520, 40, 120], [640, 90, 220], [760, 50, 140]];
+        rayos.forEach(function (r) {
+            var g = ctx.createLinearGradient(0, 0, 0, h);
+            g.addColorStop(0, 'rgba(255,245,200,0.18)');
+            g.addColorStop(1, 'rgba(255,245,200,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(r[0], 0);
+            ctx.lineTo(r[0] + r[1], 0);
+            ctx.lineTo(r[0] + r[1] - 260, h);
+            ctx.lineTo(r[0] - r[2] - 260, h);
+            ctx.closePath();
+            ctx.fill();
+        });
+    });
+
+    // ---------- El nivel completo ----------
+    for (var p = 0; p * PEDAZO_NIVEL < ANCHO_NIVEL; p++)
+    {
+        var x0 = p * PEDAZO_NIVEL;
+        lienzo(scene, 'nivel-' + p, Math.min(PEDAZO_NIVEL, ANCHO_NIVEL - x0), ALTO, function (ctx, w, h) {
+            ctx.translate(-x0, 0);   // dibuja todo el nivel; solo queda lo que cae en este pedazo
+            dibujarNivel(ctx, ANCHO_NIVEL, h);
+        });
+    }
+
+    // ---------- Primer plano ----------
+    lienzo(scene, 'follaje-frente', 1400, ALTO, function (ctx, w, h) {
+        // Hojas que cuelgan arriba
+        for (var i = 0; i < 9; i++)
+        {
+            var x = rnd.between(0, w);
+            var largo = rnd.between(40, 120);
+            repetir(w, x, function (xx) {
+                ctx.fillStyle = 'rgba(10,35,20,0.92)';
+                for (var k = 0; k < 7; k++) elipse(ctx, xx + (k - 3) * 14, largo * (1 - Math.abs(k - 3) / 4), 10, 28, (k - 3) * 0.25);
+            });
+        }
+        // Helechos abajo
+        for (var j = 0; j < 7; j++)
+        {
+            var fx = rnd.between(0, w);
+            repetir(w, fx, function (xx) {
+                ctx.fillStyle = 'rgba(12,40,22,0.95)';
+                for (var k = -4; k <= 4; k++)
+                {
+                    var ang = k * 0.28;
+                    var lx = xx + Math.sin(ang) * 50;
+                    var ly = h - Math.cos(ang) * 55;
+                    elipse(ctx, (xx + lx) / 2, (h + ly) / 2 + 10, 8, 38, ang);
+                }
+            });
+        }
+    });
+
+    // ---------- Viñeta ----------
+    lienzo(scene, 'vineta', ANCHO, ALTO, function (ctx, w, h) {
+        var g = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, h * 0.95);
+        g.addColorStop(0, 'rgba(0,0,0,0)');
+        g.addColorStop(1, 'rgba(0,15,5,0.55)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+    });
+
+    // ---------- Pequeñas texturas ----------
+    lienzo(scene, 'luz', 16, 16, function (ctx) {
+        var g = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+        g.addColorStop(0, 'rgba(255,255,200,1)');
+        g.addColorStop(0.3, 'rgba(230,255,120,0.8)');
+        g.addColorStop(1, 'rgba(200,255,100,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 16, 16);
+    });
+
+    lienzo(scene, 'hoja', 12, 7, function (ctx) {
+        ctx.fillStyle = '#4f9a3a';
+        elipse(ctx, 6, 3.5, 6, 3);
+        ctx.strokeStyle = '#2f6a22';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, 3.5); ctx.lineTo(12, 3.5); ctx.stroke();
+    });
+
+    lienzo(scene, 'ola', 64, 12, function (ctx) {
+        ctx.strokeStyle = 'rgba(210,245,255,0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (var x = 0; x <= 64; x += 2) ctx.lineTo(x, 6 + Math.sin(x / 64 * Math.PI * 2) * 3);
+        ctx.stroke();
+    });
+
+    lienzo(scene, 'ola-oscura', 48, 12, function (ctx) {
+        ctx.strokeStyle = 'rgba(20,80,110,0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (var x = 0; x <= 48; x += 2) ctx.lineTo(x, 6 + Math.sin(x / 48 * Math.PI * 2) * 3);
+        ctx.stroke();
+    });
+
+    var dibujarNenufar = function (flor) {
+        return function (ctx) {
+            ctx.fillStyle = '#3f8f3a';
+            ctx.beginPath();
+            ctx.ellipse(16, 8, 15, 6, 0, 0.35, Math.PI * 2 - 0.1);
+            ctx.lineTo(16, 8);
+            ctx.fill();
+            ctx.fillStyle = '#5fb04f';
+            elipse(ctx, 12, 7, 6, 2);
+            if (flor)
+            {
+                ctx.fillStyle = '#f5a3c7';
+                for (var p = 0; p < 5; p++) elipse(ctx, 18 + Math.cos(p * 1.25) * 3, 4 + Math.sin(p * 1.25) * 1.5, 3, 2, p * 1.25);
+                ctx.fillStyle = '#ffe066';
+                circulo(ctx, 18, 4, 1.5);
+            }
+        };
+    };
+    lienzo(scene, 'nenufar', 32, 14, dibujarNenufar(false));
+    lienzo(scene, 'nenufar-flor', 32, 14, dibujarNenufar(true));
+
+    // ---------- Arbusto de espinas (imagen aparte para poder cortarlo) ----------
+    lienzo(scene, 'espinas', 120, 72, function (ctx) {
+        dibujarObstaculo(ctx, 'espinas', 60, 68);
+    });
+
+    // ---------- Carne con hueso ----------
+    lienzo(scene, 'carne', 44, 32, function (ctx) {
+        // Hueso
+        ctx.fillStyle = '#f4ecd8';
+        ctx.fillRect(4, 13, 16, 6);
+        circulo(ctx, 5, 12, 4);
+        circulo(ctx, 5, 20, 4);
+        // Carne
+        var g = ctx.createRadialGradient(28, 12, 2, 28, 16, 16);
+        g.addColorStop(0, '#c8643a');
+        g.addColorStop(1, '#7a2e16');
+        ctx.fillStyle = g;
+        elipse(ctx, 29, 16, 14, 12, -0.2);
+        ctx.fillStyle = 'rgba(255,220,180,0.45)';
+        elipse(ctx, 25, 10, 6, 3, -0.4);
+    });
+
+    // ---------- Filete ----------
+    lienzo(scene, 'filete', 44, 30, function (ctx) {
+        ctx.fillStyle = '#f2dcc2';   // grasa del borde
+        elipse(ctx, 22, 15, 20, 13, 0.15);
+        var g = ctx.createRadialGradient(20, 12, 2, 22, 15, 18);
+        g.addColorStop(0, '#d0453a');
+        g.addColorStop(1, '#8a1f1a');
+        ctx.fillStyle = g;
+        elipse(ctx, 21, 15, 17, 10.5, 0.15);
+        // Marcas de parrilla
+        ctx.strokeStyle = 'rgba(50,15,10,0.7)';
+        ctx.lineWidth = 2.5;
+        for (var m = 0; m < 3; m++)
+        {
+            ctx.beginPath();
+            ctx.moveTo(10 + m * 8, 22);
+            ctx.lineTo(18 + m * 8, 8);
+            ctx.stroke();
+        }
+    });
+
+    // ---------- Gota de lluvia ----------
+    lienzo(scene, 'gota', 3, 18, function (ctx) {
+        var g = ctx.createLinearGradient(0, 0, 0, 18);
+        g.addColorStop(0, 'rgba(190,210,240,0)');
+        g.addColorStop(1, 'rgba(220,235,255,0.9)');
+        ctx.fillStyle = g;
+        ctx.fillRect(1, 0, 1.5, 18);
+    });
+
+    // ---------- Nubes de tormenta (oscurecen el cielo con un azul frío) ----------
+    lienzo(scene, 'nubes-tormenta', ANCHO, ALTO, function (ctx, w, h) {
+        var g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, 'rgba(8,14,28,0.9)');
+        g.addColorStop(0.45, 'rgba(20,32,55,0.4)');
+        g.addColorStop(1, 'rgba(5,10,20,0.2)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+        // Nubarrones
+        for (var i = 0; i < 26; i++)
+        {
+            var gris = rnd.between(18, 45);
+            ctx.fillStyle = 'rgba(' + gris + ',' + (gris + 8) + ',' + (gris + 25) + ',' + rnd.realInRange(0.4, 0.65) + ')';
+            elipse(ctx, rnd.between(-40, w + 40), rnd.between(-20, 110), rnd.between(70, 150), rnd.between(25, 50));
+        }
+    });
+
+    // ---------- Arcoíris (día alegre del final) ----------
+    lienzo(scene, 'arcoiris', 520, 270, function (ctx) {
+        ['#ff595e', '#ff924c', '#ffca3a', '#8ac926', '#52a675', '#1982c4', '#6a4c93'].forEach(function (color, i) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 11;
+            ctx.beginPath();
+            ctx.arc(260, 265, 250 - i * 11, Math.PI, 0);
+            ctx.stroke();
+        });
+    });
+
+    // ---------- Mariposa ----------
+    lienzo(scene, 'mariposa', 14, 10, function (ctx) {
+        ctx.fillStyle = '#ffffff';
+        elipse(ctx, 4, 3.5, 3.5, 3, -0.4);
+        elipse(ctx, 10, 3.5, 3.5, 3, 0.4);
+        elipse(ctx, 4.5, 7, 2.5, 2);
+        elipse(ctx, 9.5, 7, 2.5, 2);
+        ctx.fillStyle = '#3a2a1a';
+        ctx.fillRect(6.5, 2, 1, 7);
+    });
+
+    // ---------- Jaula de la arena: barrotes de hierro ----------
+    lienzo(scene, 'barrotes', GROSOR_BARROTES, 64, function (ctx, w, h) {
+        [4, 13, 22].forEach(function (bx) {
+            var g = ctx.createLinearGradient(bx, 0, bx + 6, 0);
+            g.addColorStop(0, '#2b3036');
+            g.addColorStop(0.5, '#8c97a3');
+            g.addColorStop(1, '#2b3036');
+            ctx.fillStyle = g;
+            ctx.fillRect(bx, 0, 6, h);
+        });
+        ctx.fillStyle = '#3d444c';   // travesaño con remaches
+        ctx.fillRect(0, 26, w, 8);
+        ctx.fillStyle = '#a9b3bd';
+        circulo(ctx, 5, 30, 1.5);
+        circulo(ctx, w - 5, 30, 1.5);
+    });
+    lienzo(scene, 'barrotes-techo', 64, 26, function (ctx, w, h) {
+        var g = ctx.createLinearGradient(0, 4, 0, 20);
+        g.addColorStop(0, '#8c97a3');
+        g.addColorStop(1, '#2b3036');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 4, w, 14);
+        ctx.fillStyle = '#3d444c';
+        for (var i = 4; i < w; i += 16)
+        {
+            ctx.fillRect(i, 18, 5, 8);   // puntas de barrotes colgando
+        }
+        ctx.fillStyle = '#c3ccd4';
+        for (var r = 8; r < w; r += 32) circulo(ctx, r, 11, 2);
+    });
+
+    // ---------- Losa de piedra (plataformas de la arena) ----------
+    lienzo(scene, 'losa', 140, 22, function (ctx, w, h) {
+        var g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, '#9aa3ab');
+        g.addColorStop(1, '#4b535b');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 4, w, h - 4);
+        ctx.strokeStyle = 'rgba(30,35,40,0.6)';
+        ctx.lineWidth = 2;
+        for (var x = 35; x < w; x += 35)
+        {
+            ctx.beginPath();
+            ctx.moveTo(x, 5);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+        }
+        ctx.fillStyle = '#4d9e45';   // musgo
+        ctx.fillRect(0, 2, w, 4);
+        for (var m = 0; m < 8; m++) elipse(ctx, rnd.between(6, w - 6), 4, rnd.between(4, 10), 2.5);
+    });
+
+    // ---------- Caja de madera ----------
+    lienzo(scene, 'caja-madera', 48, 48, function (ctx, w, h) {
+        ctx.fillStyle = '#8a5a2b';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#5a3a1a';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(2, 2, w - 4, h - 4);
+        ctx.beginPath();
+        ctx.moveTo(4, 4);
+        ctx.lineTo(w - 4, h - 4);
+        ctx.moveTo(w - 4, 4);
+        ctx.lineTo(4, h - 4);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,220,160,0.25)';
+        ctx.fillRect(4, 4, w - 8, 3);
+    });
+
+    // ---------- Jaula de bambú ----------
+    lienzo(scene, 'jaula', 120, 104, function (ctx) {
+        var i;
+        // Barrotes de bambú con nudos
+        for (i = 0; i < 9; i++)
+        {
+            var bx = 5 + i * 13.5;
+            var g = ctx.createLinearGradient(bx, 0, bx + 5, 0);
+            g.addColorStop(0, '#8a6d2a');
+            g.addColorStop(0.5, '#e0c26a');
+            g.addColorStop(1, '#8a6d2a');
+            ctx.fillStyle = g;
+            ctx.fillRect(bx, 20, 5, 74);
+            ctx.fillStyle = '#6b5220';
+            ctx.fillRect(bx - 1, 42, 7, 3);
+            ctx.fillRect(bx - 1, 70, 7, 3);
+        }
+        // Techo en arco y base de madera
+        ctx.fillStyle = '#5a3a1e';
+        ctx.beginPath();
+        ctx.moveTo(0, 26);
+        ctx.quadraticCurveTo(60, -6, 120, 26);
+        ctx.lineTo(120, 30);
+        ctx.lineTo(0, 30);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#7a5334';
+        ctx.fillRect(0, 26, 120, 4);
+        ctx.fillStyle = '#5a3a1e';
+        ctx.fillRect(0, 92, 120, 12);
+        ctx.fillStyle = '#7a5334';
+        ctx.fillRect(0, 92, 120, 4);
+        // Soga amarrada al medio
+        ctx.fillStyle = '#c9a26b';
+        ctx.fillRect(0, 56, 120, 4);
+        // Candado
+        ctx.strokeStyle = '#8f8f8f';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(60, 62, 6, Math.PI, 0);
+        ctx.stroke();
+        ctx.fillStyle = '#d4a017';
+        ctx.fillRect(52, 62, 16, 14);
+        ctx.fillStyle = '#3a2a10';
+        circulo(ctx, 60, 67, 2);
+        ctx.fillRect(59, 67, 2, 5);
+    });
+
+    // ---------- Corazón (festejo del final) ----------
+    lienzo(scene, 'corazon', 20, 18, function (ctx) {
+        ctx.fillStyle = '#ff4d6d';
+        ctx.beginPath();
+        ctx.moveTo(10, 17);
+        ctx.bezierCurveTo(-6, 6, 3, -4, 10, 4);
+        ctx.bezierCurveTo(17, -4, 26, 6, 10, 17);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        elipse(ctx, 6, 6, 2.5, 1.5, -0.6);
+    });
+
+    // ---------- Bala de la torreta ----------
+    lienzo(scene, 'bala', 22, 8, function (ctx) {
+        var g = ctx.createLinearGradient(0, 0, 22, 0);
+        g.addColorStop(0, 'rgba(255,140,40,0)');
+        g.addColorStop(0.5, '#ffb347');
+        g.addColorStop(1, '#fff4c2');
+        ctx.fillStyle = g;
+        elipse(ctx, 11, 4, 11, 3.5);
+        ctx.fillStyle = '#ffffff';
+        elipse(ctx, 17, 4, 4, 2);
+    });
+}
+
+// Copia una hoja de cuadros de 256x256 (5 columnas) a una textura nueva, moviendo
+// y escalando cada cuadro para que el cuerpo caiga justo en la caja de choque.
+// ajuste(i) devuelve { de: cuadro de origen, x, y, escala }
+function hojaAlineada (scene, clave, origen, total, ajuste)
+{
+    var img = scene.textures.get(origen).getSourceImage();
+    var tex = scene.textures.createCanvas(clave, 256 * 5, 256 * Math.ceil(total / 5));
+    var ctx = tex.getContext();
+    for (var i = 0; i < total; i++)
+    {
+        var a = ajuste(i);
+        var de = a.de !== undefined ? a.de : i;
+        var cx = (i % 5) * 256;
+        var cy = Math.floor(i / 5) * 256;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(cx, cy, 256, 256);
+        ctx.clip();   // que no se meta en el cuadro vecino
+        ctx.drawImage(img, (de % 5) * 256, Math.floor(de / 5) * 256, 256, 256,
+            cx + a.x, cy + a.y, 256 * a.escala, 256 * a.escala);
+        ctx.restore();
+        tex.add(i, 0, cx, cy, 256, 256);
+    }
+    tex.refresh();
+}
+
+// Arma los cuadros de las hojas que no tienen una cuadrícula pareja
+function crearCuadros (scene)
+{
+    // ---- Salto del Tilcayo: cada gato recortado y centrado en un cuadro de 256x256 ----
+    var hoja = scene.textures.get('ticayo-salto-hoja').getSourceImage();
+    var salto = scene.textures.createCanvas('ticayo-salto', 256 * 5, 256 * 5);
+    var ctx = salto.getContext();
+    CONTORNOS_SALTO.forEach(function (c, i) {
+        var cx = (i % 5) * 256;
+        var cy = Math.floor(i / 5) * 256;
+        var w = c[2] - c[0];
+        var h = c[3] - c[1];
+        ctx.drawImage(hoja, cx + c[0], cy + c[1], w, h, cx + 128 - w / 2, cy + 128 - h / 2, w, h);
+        salto.add(i, 0, cx, cy, 256, 256);
+    });
+    salto.refresh();
+
+    // ---- Caminar: el gato está 8 px más a la izquierda y 4 más abajo que en idle ----
+    hojaAlineada(scene, 'ticayo-camina', 'ticayo-camina-hoja', 25, function () {
+        return { x: 8, y: -4, escala: 1 };
+    });
+
+    // ---- Guerrero caminando: corrido 24 px a la derecha respecto al guerrero quieto ----
+    hojaAlineada(scene, 'guerrero-camina', 'guerrero-camina-hoja', 12, function () {
+        return { x: -24, y: 1, escala: 1 };
+    });
+
+    // ---- Guerrero saltando: en esta hoja es más chico (x1.3) y sube y baja dentro
+    // del cuadro. Se usan solo los cuadros en el aire (5-10), centrados en la caja ----
+    var k = 1.3;
+    var alturas = [[33, 206], [0, 150], [0, 133], [0, 132], [6, 156], [35, 197]];   // [arriba, abajo]
+    hojaAlineada(scene, 'guerrero-salto', 'guerrero-salto-hoja', 6, function (i) {
+        var centro = (alturas[i][0] + alturas[i][1]) / 2;
+        return { de: 5 + i, x: 112 - 130 * k, y: 150 - centro * k, escala: k };
+    });
+
+    // ---- Torreta: todos los cuadros miden lo mismo (el 0 es más angosto
+    // porque no tiene fogonazo, se rellena por la derecha) ----
+    var tex = scene.textures.get('torreta');
+    CUADROS_TORRETA.forEach(function (c, i) {
+        var f = tex.add('f' + i, 0, c[0], 0, c[1], ALTO_CUADRO_TORRETA);
+        if (c[1] < ANCHO_CUADRO_TORRETA)
+        {
+            f.setTrim(ANCHO_CUADRO_TORRETA, ALTO_CUADRO_TORRETA, 0, 0, c[1], ALTO_CUADRO_TORRETA);
+        }
+    });
+
+    // ---- Jefe: todos los cuadros de una hoja miden lo mismo y tienen el ancla
+    // (el cuerpo) en la misma x, así no tiembla al cambiar de cuadro ----
+    Object.keys(HOJAS_JEFE).forEach(function (hoja) {
+        var datos = HOJAS_JEFE[hoja];
+        var texJefe = scene.textures.get('jefe-' + hoja);
+        datos.ancla = Math.max.apply(null, datos.cuadros.map(function (c) { return c[2]; }));
+        datos.anchoCuadro = datos.ancla + Math.max.apply(null, datos.cuadros.map(function (c) { return c[1] - c[2]; }));
+        datos.cuadros.forEach(function (c, n) {
+            var f = texJefe.add(n, 0, c[0], 0, c[1], datos.alto);
+            f.setTrim(datos.anchoCuadro, datos.alto, datos.ancla - c[2], 0, c[1], datos.alto);
+        });
+    });
+}
+
+function dibujarNivel (ctx, w, h)
+{
+    var i;
+
+    // ---- Agua (va primero para que las orillas la tapen) ----
+    for (i = 0; i < TRAMOS_SUELO.length - 1; i++)
+    {
+        var a = TRAMOS_SUELO[i][1] - 20;
+        var b = TRAMOS_SUELO[i + 1][0] + 20;
+        var g = ctx.createLinearGradient(0, AGUA_Y, 0, h);
+        g.addColorStop(0, '#3fb0c0');
+        g.addColorStop(0.3, '#1f7f99');
+        g.addColorStop(1, '#0b3a4f');
+        ctx.fillStyle = g;
+        ctx.fillRect(a, AGUA_Y, b - a, h - AGUA_Y);
+
+        // Piedras hundidas
+        ctx.fillStyle = 'rgba(10,50,60,0.5)';
+        for (var p = 0; p < 4; p++) elipse(ctx, rnd.between(a + 30, b - 30), rnd.between(575, 595), rnd.between(10, 22), rnd.between(5, 9));
+    }
+
+    // ---- Árboles del nivel (detrás del suelo) ----
+    ARBOLES_NIVEL.forEach(function (x) {
+        tronco(ctx, x, 0, SUELO_Y + 10, 100, '#3a2515', '#7a5334');
+    });
+
+    // ---- Ramas ----
+    RAMAS.forEach(function (r) {
+        var x = r[0], y = r[1], largo = r[2];
+        var g = ctx.createLinearGradient(0, y, 0, y + 18);
+        g.addColorStop(0, '#8a5d38');
+        g.addColorStop(1, '#4a2f1a');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(x, y + 2);
+        ctx.lineTo(x + largo, y);
+        ctx.lineTo(x + largo, y + 18);
+        ctx.lineTo(x, y + 14);
+        ctx.closePath();
+        ctx.fill();
+        // Musgo encima
+        ctx.fillStyle = '#4d9e45';
+        ctx.fillRect(x, y - 2, largo, 5);
+        ctx.fillStyle = '#6cbf5a';
+        for (var k = x + 4; k < x + largo - 4; k += 6) ctx.fillRect(k, y - 4 - rnd.between(0, 3), 2, 4);
+        // Hojas colgando
+        ctx.fillStyle = '#2f7a44';
+        for (var m = 0; m < largo / 25; m++) elipse(ctx, x + rnd.between(8, largo - 8), y + 20, 4, 9, rnd.realInRange(-0.4, 0.4));
+    });
+
+    // ---- Copas de los árboles del nivel ----
+    ARBOLES_NIVEL.forEach(function (x) {
+        copa(ctx, x, 30, 190, ['#1f5a34', '#2f7a44', '#4d9e56']);
+        liana(ctx, x - 150, 330, 25, '#3a5a2a', '#4f9a45');
+        liana(ctx, x + 170, 260, -20, '#3a5a2a', '#4f9a45');
+    });
+
+    // ---- Suelo ----
+    TRAMOS_SUELO.forEach(function (t) {
+        var x1 = t[0], x2 = t[1];
+        var r = 16;
+        var g = ctx.createLinearGradient(0, SUELO_Y, 0, h);
+        g.addColorStop(0, '#7a4b2a');
+        g.addColorStop(1, '#2e1a0e');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(x1, h);
+        ctx.lineTo(x1, SUELO_Y + r);
+        ctx.quadraticCurveTo(x1, SUELO_Y, x1 + r, SUELO_Y);
+        ctx.lineTo(x2 - r, SUELO_Y);
+        ctx.quadraticCurveTo(x2, SUELO_Y, x2, SUELO_Y + r);
+        ctx.lineTo(x2, h);
+        ctx.closePath();
+        ctx.fill();
+
+        // Piedritas y raíces en la tierra
+        for (var p = 0; p < (x2 - x1) / 18; p++)
+        {
+            ctx.fillStyle = rnd.pick(['#5a3620', '#8a5a36', '#4a2c18']);
+            elipse(ctx, rnd.between(x1 + 8, x2 - 8), rnd.between(SUELO_Y + 20, h - 5), rnd.between(2, 6), rnd.between(2, 4));
+        }
+        ctx.strokeStyle = 'rgba(40,20,10,0.6)';
+        ctx.lineWidth = 2;
+        for (var q = 0; q < (x2 - x1) / 120; q++)
+        {
+            var rx = rnd.between(x1 + 20, x2 - 60);
+            ctx.beginPath();
+            ctx.moveTo(rx, SUELO_Y + 12);
+            ctx.quadraticCurveTo(rx + 20, SUELO_Y + 40, rx + rnd.between(40, 70), SUELO_Y + rnd.between(30, 60));
+            ctx.stroke();
+        }
+
+        // Pasto
+        ctx.fillStyle = '#2b6e2e';
+        ctx.fillRect(x1 + 4, SUELO_Y + 4, x2 - x1 - 8, 8);
+        ctx.fillStyle = '#3f9b3f';
+        ctx.fillRect(x1 + 4, SUELO_Y - 2, x2 - x1 - 8, 8);
+        ctx.lineWidth = 2;
+        for (var x = x1 + 6; x < x2 - 6; x += 3)
+        {
+            ctx.strokeStyle = rnd.pick(['#3f9b3f', '#5cb84a', '#2f7f34', '#78c85a']);
+            ctx.beginPath();
+            ctx.moveTo(x, SUELO_Y + 2);
+            ctx.lineTo(x + rnd.between(-3, 3), SUELO_Y - rnd.between(4, 13));
+            ctx.stroke();
+        }
+    });
+
+    // ---- Juncos en las orillas ----
+    for (i = 0; i < TRAMOS_SUELO.length - 1; i++)
+    {
+        [TRAMOS_SUELO[i][1] + 6, TRAMOS_SUELO[i + 1][0] - 30].forEach(function (bx) {
+            for (var j = 0; j < 6; j++)
+            {
+                var jx = bx + j * 4 + rnd.between(-1, 1);
+                var alto = rnd.between(30, 55);
+                ctx.strokeStyle = '#4f8f3a';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(jx, AGUA_Y + 8);
+                ctx.quadraticCurveTo(jx + 2, AGUA_Y - alto / 2, jx + rnd.between(-5, 5), AGUA_Y - alto);
+                ctx.stroke();
+                if (j % 2 === 0)
+                {
+                    ctx.fillStyle = '#6b3f1d';
+                    elipse(ctx, jx + 1, AGUA_Y - alto * 0.7, 2.5, 7);
+                }
+            }
+        });
+    }
+
+    // ---- Pirámide del final ----
+    dibujarPiramide(ctx);
+
+    // ---- Obstáculos ----
+    // (las espinas se dibujan aparte porque se pueden cortar)
+    OBSTACULOS.forEach(function (o) {
+        if (o.tipo !== 'espinas')
+        {
+            dibujarObstaculo(ctx, o.tipo, o.x, SUELO_Y);
+        }
+    });
+}
+
+// Pirámide escalonada de piedra, con musgo y puerta de templo
+function dibujarPiramide (ctx)
+{
+    var P = PIRAMIDE;
+    for (var e = 0; e < P.escalones; e++)
+    {
+        var x1 = P.x1 + e * P.paso;
+        var x2 = P.x2 - e * P.paso;
+        var y1 = SUELO_Y - (e + 1) * P.alto;
+        var y2 = SUELO_Y - e * P.alto + (e === 0 ? 6 : 0);
+        var mitad = y1 + P.alto / 2;
+
+        var g = ctx.createLinearGradient(0, y1, 0, y2);
+        g.addColorStop(0, '#b8a27a');
+        g.addColorStop(1, '#7d6a4a');
+        ctx.fillStyle = g;
+        ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+
+        // Bloques de piedra (hileras desfasadas)
+        ctx.strokeStyle = 'rgba(60,45,25,0.55)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, mitad);
+        ctx.lineTo(x2, mitad);
+        for (var fila = 0; fila < 2; fila++)
+        {
+            var yy = y1 + fila * P.alto / 2;
+            for (var bx = x1 + (fila ? 20 : 40); bx < x2 - 6; bx += 40)
+            {
+                ctx.moveTo(bx, yy);
+                ctx.lineTo(bx, yy + P.alto / 2);
+            }
+        }
+        ctx.stroke();
+
+        // Borde claro del escalón, sombra al costado y musgo
+        ctx.fillStyle = '#d9c89e';
+        ctx.fillRect(x1, y1, x2 - x1, 4);
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(x2 - 8, y1, 8, y2 - y1);
+        ctx.fillStyle = 'rgba(77,158,69,0.9)';
+        for (var m = 0; m < (x2 - x1) / 35; m++)
+        {
+            elipse(ctx, rnd.between(x1 + 8, x2 - 8), y1 + 2, rnd.between(6, 14), 3);
+        }
+        // Enredaderas que cuelgan del borde
+        ctx.strokeStyle = '#3f7f36';
+        ctx.lineWidth = 2;
+        for (var v = 0; v < 2; v++)
+        {
+            var vx = rnd.between(x1 + 10, x2 - 10);
+            ctx.beginPath();
+            ctx.moveTo(vx, y1 + 3);
+            ctx.quadraticCurveTo(vx + 6, y1 + 15, vx + rnd.between(-4, 4), y1 + rnd.between(18, 34));
+            ctx.stroke();
+        }
+    }
+
+    // Puerta del templo en la base
+    var cx = CENTRO_PIRAMIDE;
+    ctx.fillStyle = '#5e4e34';
+    ctx.fillRect(cx - 30, SUELO_Y - 74, 60, 74);
+    ctx.fillStyle = '#1f170e';
+    ctx.beginPath();
+    ctx.moveTo(cx - 20, SUELO_Y);
+    ctx.lineTo(cx - 20, SUELO_Y - 50);
+    ctx.lineTo(cx, SUELO_Y - 64);
+    ctx.lineTo(cx + 20, SUELO_Y - 50);
+    ctx.lineTo(cx + 20, SUELO_Y);
+    ctx.closePath();
+    ctx.fill();
+
+    // Antorchas a los lados de la cima (en el penúltimo escalón)
+    var base = CIMA_Y + P.alto;
+    [P.x1 + (P.escalones - 1) * P.paso + 12, P.x2 - (P.escalones - 1) * P.paso - 12].forEach(function (tx) {
+        ctx.fillStyle = '#4a2f1a';
+        ctx.fillRect(tx - 3, base - 30, 6, 30);
+        var fuego = ctx.createRadialGradient(tx, base - 38, 1, tx, base - 36, 12);
+        fuego.addColorStop(0, '#fff3b0');
+        fuego.addColorStop(0.5, '#ffae3b');
+        fuego.addColorStop(1, 'rgba(255,90,20,0)');
+        ctx.fillStyle = fuego;
+        circulo(ctx, tx, base - 38, 12);
+    });
+}
+
+function dibujarObstaculo (ctx, tipo, x, y)
+{
+    var g, i;
+
+    if (tipo === 'roca')
+    {
+        g = ctx.createLinearGradient(x - 40, y - 50, x + 30, y);
+        g.addColorStop(0, '#a39e8e');
+        g.addColorStop(1, '#4a463e');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(x - 45, y + 4);
+        ctx.quadraticCurveTo(x - 48, y - 30, x - 15, y - 48);
+        ctx.quadraticCurveTo(x + 25, y - 55, x + 42, y - 20);
+        ctx.quadraticCurveTo(x + 50, y, x + 45, y + 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        elipse(ctx, x - 12, y - 38, 14, 6, -0.3);
+        ctx.fillStyle = '#4d8f3a';
+        elipse(ctx, x + 5, y - 48, 20, 6, 0.1);
+        ctx.fillStyle = '#5fa845';
+        elipse(ctx, x - 5, y - 50, 10, 4);
+    }
+    else if (tipo === 'tronco')
+    {
+        var largo = 150, alto = 42;
+        g = ctx.createLinearGradient(0, y - alto, 0, y);
+        g.addColorStop(0, '#8a5d38');
+        g.addColorStop(0.5, '#6a4428');
+        g.addColorStop(1, '#3a2515');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - largo / 2, y - alto, largo, alto);
+        ctx.strokeStyle = 'rgba(30,15,5,0.5)';
+        ctx.lineWidth = 2;
+        for (i = 0; i < 4; i++)
+        {
+            ctx.beginPath();
+            ctx.moveTo(x - largo / 2, y - alto + 8 + i * 9);
+            ctx.lineTo(x + largo / 2, y - alto + 8 + i * 9 + rnd.between(-2, 2));
+            ctx.stroke();
+        }
+        // Corte con anillos
+        ctx.fillStyle = '#c89b6a';
+        elipse(ctx, x + largo / 2, y - alto / 2, 10, alto / 2);
+        ctx.strokeStyle = '#8a5d38';
+        for (i = 1; i < 4; i++)
+        {
+            ctx.beginPath();
+            ctx.ellipse(x + largo / 2, y - alto / 2, 10 - i * 2.5, alto / 2 - i * 5, 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        // Hongos
+        [[x - 30, '#e85d3a'], [x - 10, '#f08a4b'], [x + 30, '#e85d3a']].forEach(function (h) {
+            ctx.fillStyle = '#f3e3c3';
+            ctx.fillRect(h[0] - 2, y - alto - 6, 4, 8);
+            ctx.fillStyle = h[1];
+            elipse(ctx, h[0], y - alto - 6, 8, 5);
+            ctx.fillStyle = '#fff';
+            circulo(ctx, h[0] - 3, y - alto - 8, 1.3);
+            circulo(ctx, h[0] + 3, y - alto - 7, 1.3);
+        });
+        // Musgo
+        ctx.fillStyle = '#4d9e45';
+        ctx.fillRect(x - largo / 2 + 10, y - alto - 2, 50, 4);
+    }
+    else if (tipo === 'espinas')
+    {
+        // Arbusto de espinas (hace daño)
+        copa(ctx, x, y - 22, 36, ['#1f4a24', '#2d6630', '#3d7f3a']);
+        for (i = 0; i < 14; i++)
+        {
+            var ang = -Math.PI + (i / 13) * Math.PI;
+            var bx = x + Math.cos(ang) * 38;
+            var by = y - 20 + Math.sin(ang) * 30;
+            ctx.fillStyle = '#d8d0b0';
+            ctx.beginPath();
+            ctx.moveTo(bx - 4, by + 3);
+            ctx.lineTo(bx + Math.cos(ang) * 14, by + Math.sin(ang) * 14);
+            ctx.lineTo(bx + 4, by + 3);
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.fillStyle = '#c0392b';
+        for (i = 0; i < 6; i++) circulo(ctx, x + rnd.between(-25, 25), y - rnd.between(15, 40), 3);
+    }
+    else if (tipo === 'tocon')
+    {
+        g = ctx.createLinearGradient(x - 28, 0, x + 28, 0);
+        g.addColorStop(0, '#3a2515');
+        g.addColorStop(0.6, '#7a5334');
+        g.addColorStop(1, '#3a2515');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - 26, y - 45, 52, 47);
+        ctx.beginPath();
+        ctx.moveTo(x - 26, y + 2); ctx.quadraticCurveTo(x - 30, y - 10, x - 40, y + 2); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x + 26, y + 2); ctx.quadraticCurveTo(x + 30, y - 10, x + 42, y + 2); ctx.fill();
+        ctx.fillStyle = '#c89b6a';
+        elipse(ctx, x, y - 45, 26, 7);
+        ctx.strokeStyle = '#8a5d38';
+        ctx.lineWidth = 1.5;
+        for (i = 1; i < 4; i++)
+        {
+            ctx.beginPath();
+            ctx.ellipse(x, y - 45, 26 - i * 6, 7 - i * 1.6, 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    }
+}
+
+</script>
+
+</body>
+</html>
